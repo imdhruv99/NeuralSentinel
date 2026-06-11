@@ -1,0 +1,64 @@
+# -----------------------------
+# Environment & Secrets
+# -----------------------------
+.env
+.env.*
+!.env.example
+
+# -----------------------------
+# Infrastructure Data Volumes
+# -----------------------------
+infra/data/
+data/
+*.rdb
+*.aof
+
+# -----------------------------
+# Logs
+# -----------------------------
+logs/
+*.log
+infra/logs/
+
+# -----------------------------
+# Python (MLflow / Downstream Apps)
+# -----------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# -----------------------------
+# Docker
+# -----------------------------
+.docker/
+
+# -----------------------------
+# IDEs and Editors
+# -----------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# -----------------------------
+# OS Generated Files
+# -----------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
