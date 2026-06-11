@@ -1,0 +1,147 @@
+services:
+
+  # Controllers (KRaft quorum — metadata only, no client traffic)
+  kafka-controller:
+    image: ${KAFKA_IMAGE}
+    container_name: kafka-controller
+    hostname: kafka-controller
+    user: "1000:1000"
+    networks:
+      - neuralsentinel-network
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: controller
+      KAFKA_LISTENERS: CONTROLLER://kafka-controller:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_LOG_DIRS: ${KAFKA_LOG_DIRS}
+    volumes:
+      - kafka-controller-data:/var/lib/kafka/data
+    mem_limit: ${KAFKA_CONTROLLER_MEM_LIMIT}
+    mem_reservation: ${KAFKA_CONTROLLER_MEM_RESERVATION}
+    cpus: ${KAFKA_CONTROLLER_CPU_LIMIT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-controller kafka-controller:9093 describe --status > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Brokers
+  kafka-broker-1:
+    image: ${KAFKA_IMAGE}
+    container_name: kafka-broker-1
+    hostname: kafka-broker-1
+    user: "1000:1000"
+    networks:
+      - neuralsentinel-network
+    ports:
+      - "19091:19091"
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19091
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-broker-1:9092,EXTERNAL://localhost:19091
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_LOG_DIRS: ${KAFKA_LOG_DIRS}
+      KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: ${KAFKA_AUTO_CREATE_TOPICS_ENABLE}
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS}
+      KAFKA_LOG_SEGMENT_BYTES: ${KAFKA_LOG_SEGMENT_BYTES}
+      KAFKA_LOG_CLEANER_ENABLE: ${KAFKA_LOG_CLEANER_ENABLE}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: ${KAFKA_DEFAULT_REPLICATION_FACTOR}
+      KAFKA_MIN_INSYNC_REPLICAS: ${KAFKA_MIN_INSYNC_REPLICAS}
+      KAFKA_MESSAGE_MAX_BYTES: ${KAFKA_MESSAGE_MAX_BYTES}
+    volumes:
+      - kafka-broker-1-data:/var/lib/kafka/data
+    mem_limit: ${KAFKA_BROKER_MEM_LIMIT}
+    mem_reservation: ${KAFKA_BROKER_MEM_RESERVATION}
+    cpus: ${KAFKA_BROKER_CPU_LIMIT}
+    restart: unless-stopped
+    depends_on:
+      kafka-controller:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  kafka-broker-2:
+    image: ${KAFKA_IMAGE}
+    container_name: kafka-broker-2
+    hostname: kafka-broker-2
+    user: "1000:1000"
+    networks:
+      - neuralsentinel-network
+    ports:
+      - "19092:19092"
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-broker-2:9092,EXTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_LOG_DIRS: ${KAFKA_LOG_DIRS}
+      KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: ${KAFKA_AUTO_CREATE_TOPICS_ENABLE}
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS}
+      KAFKA_LOG_SEGMENT_BYTES: ${KAFKA_LOG_SEGMENT_BYTES}
+      KAFKA_LOG_CLEANER_ENABLE: ${KAFKA_LOG_CLEANER_ENABLE}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: ${KAFKA_DEFAULT_REPLICATION_FACTOR}
+      KAFKA_MIN_INSYNC_REPLICAS: ${KAFKA_MIN_INSYNC_REPLICAS}
+      KAFKA_MESSAGE_MAX_BYTES: ${KAFKA_MESSAGE_MAX_BYTES}
+    volumes:
+      - kafka-broker-2-data:/var/lib/kafka/data
+    mem_limit: ${KAFKA_BROKER_MEM_LIMIT}
+    mem_reservation: ${KAFKA_BROKER_MEM_RESERVATION}
+    cpus: ${KAFKA_BROKER_CPU_LIMIT}
+    restart: unless-stopped
+    depends_on:
+      kafka-controller:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  # Kafka UI
+  kafka-ui:
+    image: ${KAFKA_UI_IMAGE}
+    container_name: kafka-ui
+    networks:
+      - neuralsentinel-network
+    ports:
+      - "18080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ${KAFKA_CLUSTER_ID}
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-broker-1:9092,kafka-broker-2:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_ENABLED: "false"
+      AUTH_TYPE: "LOGIN_FORM"
+      SPRING_SECURITY_USER_NAME: ${KAFKA_UI_USER}
+      SPRING_SECURITY_USER_PASSWORD: ${KAFKA_UI_PASSWORD}
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kafka-controller-data:
+  kafka-broker-1-data:
+  kafka-broker-2-data:

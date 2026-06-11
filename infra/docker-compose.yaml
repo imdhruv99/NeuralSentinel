@@ -1,0 +1,9 @@
+networks:
+  neuralsentinel-network:
+    driver: bridge
+
+include:
+  - kafka-docker-compose.yaml
+  - postgres-docker-compose.yaml
+  - redis-docker-compose.yaml
+  - mlflow-docker-compose.yaml

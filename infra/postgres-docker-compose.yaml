@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    container_name: postgres
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    # Activates the mounted postgresql.conf and pg_hba.conf as the authoritative
+    # config sources, preventing the Docker entrypoint from regenerating them.
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS}
+      # Passed so init.sql can create the nsapp user with the correct password.
+      NSAPP_PASSWORD: ${NSAPP_PASSWORD}
+      PGOPTIONS: "-c app.nsapp_password=${NSAPP_PASSWORD}"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./conf/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./conf/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      # Runs once on first start: creates mlflow DB + nsapp least-privilege user.
+      - ./conf/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - neuralsentinel-network
+    mem_limit: ${POSTGRES_MEM_LIMIT}
+    mem_reservation: ${POSTGRES_MEM_RESERVATION}
+    cpus: ${POSTGRES_CPU_LIMIT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  pgadmin:
+    image: ${PGADMIN_IMAGE}
+    container_name: pgadmin
+    hostname: pgadmin
+    ports:
+      - "${PGADMIN_HOST_PORT}:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    volumes:
+      - ./data/pgadmin:/var/lib/pgadmin
+    networks:
+      - neuralsentinel-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped

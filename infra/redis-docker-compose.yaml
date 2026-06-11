@@ -1,0 +1,41 @@
+services:
+  redis:
+    image: ${REDIS_IMAGE}
+    container_name: redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    command: >
+      sh -c "sed 's/REDIS_PASSWORD_PLACEHOLDER/${REDIS_PASSWORD}/' /usr/local/etc/redis/redis.conf
+      | redis-server --"
+    volumes:
+      - ./data/redis:/data
+      - ./conf/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    mem_limit: ${REDIS_MEM_LIMIT}
+    mem_reservation: ${REDIS_MEM_RESERVATION}
+    cpus: ${REDIS_CPU_LIMIT}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - neuralsentinel-network
+    restart: unless-stopped
+
+  redis-ui:
+    image: ${REDIS_UI_IMAGE}
+    container_name: redis-ui
+    ports:
+      - "${REDIS_UI_PORT}:8081"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks:
+      - neuralsentinel-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
