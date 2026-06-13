@@ -26,9 +26,10 @@ def load_topic_definitions(path: Path) -> list[dict]:
 
     for t in topics:
         required_fields = ["name", "partitions", "replication_factor"]
-        missing = required_fields - set(t.keys())
+        missing = set(required_fields) - set(t.keys())
         if missing:
-            raise ValueError(f"Topic definition missing required fields: {missing} in {t}")
+            raise ValueError(
+                f"Topic definition missing required fields: {missing} in {t}")
     return topics
 
 
@@ -92,7 +93,8 @@ def sync_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
     if to_create:
         print(f"\n Creating {len(to_create)} new topic(s):")
         for t in to_create:
-            print(f"  + {t.name}  (partitions={t.num_partitions}, rf={t.replication_factor})")
+            print(
+                f"  + {t.name}  (partitions={t.num_partitions}, rf={t.replication_factor})")
         try:
             admin.create_topics(new_topics=to_create, validate_only=False)
             print(" Topics are Created successfully.")

@@ -17,6 +17,9 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 
 ```text
 .
+├── docs
+│   ├── schema.md
+│   └── Tickets.md
 ├── infra
 │   ├── conf
 │   │   ├── init.sql
@@ -28,6 +31,11 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 │   ├── mlflow-docker-compose.yaml
 │   ├── postgres-docker-compose.yaml
 │   └── redis-docker-compose.yaml
+├── services
+│   └── producer
+│       ├── config.py
+│       ├── topic_admin.py
+│       └── topics.yaml
 ├── Makefile
 └── README.md
 
@@ -54,5 +62,36 @@ Run the following Make commands from the root directory to manage the stack:
 - **Stop containers without removing them:** `make stop`.
 - **Start existing containers:** `make start`.
 - **Restart the stack:** `make restart`.
+
+---
+
+## Kafka Topics & Event Schema
+
+All events share a single canonical `EventEnvelope` that wraps both dataset
+shapes — NAB (univariate) and SMD (38-dim multivariate). The full field
+reference, per-dataset `metrics` structure, and partition-key strategy live in
+[docs/schema.md](docs/schema.md).
+
+Topics are managed **declaratively**: the desired state lives in
+[services/producer/topics.yaml](services/producer/topics.yaml), and
+`topic_admin.py` reconciles the live cluster against it (create missing topics,
+update configs on existing ones, never silently change partition count).
+
+| Topic | Partitions | RF | Retention | Purpose |
+|---|---|---|---|---|
+| `events.raw` | 6 | 2 | 72h | Raw dataset rows replayed by the producers |
+| `events.scored` | 6 | 2 | 24h | Events annotated with anomaly scores |
+| `alerts` | 3 | 2 | 24h | Threshold-crossing anomaly alerts |
+
+> Replication factor is **2** because the cluster runs **2 brokers**. The
+> partition key is `entity_id`, which guarantees per-stream ordering — a hard
+> requirement for the LSTM-AE sequence buffer.
+
+Manage topics from the host (uses the external listener ports):
+
+- **Create / update topics:** `make topics-sync` (idempotent)
+- **List cluster topics:** `make topics-list`
+- **Delete all declared topics:** `make topics-delete` (destructive; needed to
+  change partition count or replication factor, which require delete + recreate)
 
 ---

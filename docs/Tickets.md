@@ -5,7 +5,7 @@
 
 ---
 
-### RTAD-001 — Bootstrap repo + Docker Compose skeleton - COMPLETE
+### RTAD-001 — Bootstrap repo + Docker Compose skeleton - COMPLETED
 
 - **Type:** Task · **Epic:** A Infra · **Priority:** Critical · **Points:** 3
 - **Description:** Create the mono-repo layout and a Compose stack that brings up Kafka, Zookeeper/KRaft, Postgres, Redis, and MLflow so all later work has a runnable base.
@@ -18,7 +18,7 @@
 - **Config:** `KAFKA_BOOTSTRAP=localhost:9092`, `POSTGRES_*`, `REDIS_URL`, `MLFLOW_TRACKING_URI`.
 - **DoD:** Stack boots clean on a fresh machine; README "Setup" section complete.
 
-### RTAD-002 — Define event schema + declarative Kafka topic automation
+### RTAD-002 — Define event schema + declarative Kafka topic automation - COMPLETED
 
 - **Type:** Task · **Epic:** A · **Priority:** High · **Points:** 2
 - **Description:** Establish a single canonical `EventEnvelope` that wraps **both** dataset shapes (NAB univariate + SMD 38-dim multivariate) and manage Kafka topics declaratively, so every producer/consumer shares one contract. Schema and topics are co-designed because the envelope's `metrics` payload differs per dataset — this is why RTAD-002 and RTAD-003 are interconnected.
