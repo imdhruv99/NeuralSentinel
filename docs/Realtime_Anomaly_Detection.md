@@ -14,18 +14,20 @@ Kafka · Isolation Forest + LSTM Autoencoder (PyTorch/sklearn) · FastAPI · Rea
 ## Architecture (sketch)
 ```mermaid
 flowchart LR
-  P[Event Producer] --> K[(Kafka)]
-  K --> C[Stream Consumer/Scorer]
-  C --> M{{Model: IForest + LSTM-AE}}
-  M --> A[Alert API - FastAPI]
-  A --> R[React Dashboard]
+  NAB["NAB replay<br/>(58 univariate streams)"] --> K[("Kafka<br/>events.raw")]
+  SMD["SMD replay<br/>(28 machines x 38 metrics)"] --> K
+  K --> C["Stream Consumer<br/>+ feature windowing"]
   C --> DB[(Postgres)]
-  Dagster --> Train[Retrain] --> MLF[(MLFlow Registry)] --> M
+  C --> M{{"IForest (NAB) + LSTM-AE (SMD)"}}
+  M --> SC[("Kafka<br/>events.scored")]
+  SC --> A["Alert API (FastAPI)"]
+  A --> R["React Dashboard"]
+  Dagster --> Train[Retrain] --> MLF[("MLflow Registry")] --> M
 ```
 
 ## Scope Skeleton (expand to full 15-ticket contract when starting)
 - Epic A: Infra + Kafka topics + Docker Compose
-- Epic B: Synthetic event generator + ingestion
+- Epic B: Dataset replay producers (NAB + SMD) + streaming ingestion
 - Epic C: Model training (IForest, LSTM-AE) + MLFlow tracking
 - Epic D: Real-time scoring consumer + alert API
 - Epic E: React dashboard + live anomaly view
@@ -42,7 +44,7 @@ flowchart LR
 | **NSL-KDD** | Network intrusion records, ~150K rows | Open (research) | Tabular anomaly variant / Isolation Forest demo | Kaggle: `kaggle datasets download hassan06/nslkdd` |
 | **Built-in synthetic generator** | You generate it (sine + drift + spikes) | Yours | Fully reproducible demo with no download or license worry | Code in Epic B |
 
-> **Recommended:** NAB for the labeled live demo + your synthetic generator for reproducibility. Add SMD if you want a meatier multivariate LSTM-AE story.
+> **Chosen:** **NAB** drives the labeled univariate demo (Isolation Forest) and **SMD** drives the multivariate LSTM-Autoencoder story. Both are real, labeled datasets replayed as live streams — no synthetic generation, so the demo reflects production-shaped data.
 
 ## How to Pursue Them (workflow)
 1. **Get Kaggle API** once: create token at kaggle.com → `~/.kaggle/kaggle.json`, `chmod 600`. (Never commit it.)
@@ -53,7 +55,7 @@ flowchart LR
 6. **Evaluate** against NAB labels (precision/recall, NAB score) and tune the alert threshold toward precision to avoid alert storms.
 
 ## Full Tool Stack (all free / local)
-- **Ingestion/stream:** Apache Kafka (Docker), synthetic producer (Python).
+- **Ingestion/stream:** Apache Kafka (Docker), dataset replay producers (NAB + SMD, Python).
 - **Processing/scoring:** Python consumer (or Spark Structured Streaming if you scale).
 - **Models:** scikit-learn Isolation Forest, PyTorch LSTM-Autoencoder.
 - **Experiments + registry:** MLflow (local server in Compose).

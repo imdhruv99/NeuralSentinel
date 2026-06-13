@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class ProducerConfig(BaseSettings):
     """
     Configuration for all producer related settings.
@@ -20,7 +21,7 @@ class ProducerConfig(BaseSettings):
         # this let us run file from any working directory.
         env_file=Path(__file__).parent.parent.parent / ".env",
         env_file_encoding="utf-8",
-        extra="ignore" # Don't fail on unrecognized fields env vars
+        extra="ignore"  # Don't fail on unrecognized fields env vars
     )
 
     # Kafka Connection Settings
@@ -61,12 +62,12 @@ class ProducerConfig(BaseSettings):
         alias="NAB_LABELS_FILE",
         description="Path to the combined_labels.json ground-truth file for NAB dataset.",
     )
-    nab_reply_speed: float = Field(
+    nab_replay_speed: float = Field(
         default=0.0,
-        alias="NAB_REPLY_SPEED",
+        alias="NAB_REPLAY_SPEED",
         description=(
-            "Relay speed multiplier for NAB data." \
-            "0.0 means max speed (no sleep), 1.0 means real-time" \
+            "Replay speed multiplier for NAB data."
+            "0.0 means max speed (no sleep), 1.0 means real-time"
             "0.1, means 10x faster than real-time, etc."
         )
     )
@@ -77,7 +78,6 @@ class ProducerConfig(BaseSettings):
         alias="NAB_STREAM_FILTER",
         description="If set, only replay the stream whose relative path contains this string.",
     )
-
 
     # SMD Producer settings
     smd_data_dir: Path = Field(
@@ -92,8 +92,8 @@ class ProducerConfig(BaseSettings):
         default=0.0,
         alias="SMD_REPLAY_SPEED",
         description=(
-            "Relay speed multiplier for SMD data." \
-            "0.0 means max speed (no sleep), 1.0 means real-time" \
+            "Replay speed multiplier for SMD data."
+            "0.0 means max speed (no sleep), 1.0 means real-time"
             "0.1, means 10x faster than real-time, etc."
         )
     )
@@ -115,7 +115,7 @@ class ProducerConfig(BaseSettings):
 
     # Kafka producer performance settings
     producer_batch_size: int = Field(
-        default=16384, # 16KB - Kafka's default
+        default=16384,  # 16KB - Kafka's default
         alias="PRODUCER_BATCH_SIZE",
         description=(
             "Kafka producer batch size in bytes. The producer buffers records "
@@ -145,11 +145,11 @@ class ProducerConfig(BaseSettings):
         ),
     )
 
-
     @field_validator("producer_compression")
     @classmethod
     def validate_compression(cls, v: str) -> str:
         allowed = {"none", "gzip", "snappy", "lz4", "zstd"}
         if v not in allowed:
-            raise ValueError(f"producer_compression must be one of {allowed}, got '{v}'")
+            raise ValueError(
+                f"producer_compression must be one of {allowed}, got '{v}'")
         return v

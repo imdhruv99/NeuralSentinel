@@ -18,25 +18,25 @@
 - **Config:** `KAFKA_BOOTSTRAP=localhost:9092`, `POSTGRES_*`, `REDIS_URL`, `MLFLOW_TRACKING_URI`.
 - **DoD:** Stack boots clean on a fresh machine; README "Setup" section complete.
 
-### RTAD-002 — Define event schema + Kafka topics
+### RTAD-002 — Define event schema + declarative Kafka topic automation
 
 - **Type:** Task · **Epic:** A · **Priority:** High · **Points:** 2
-- **Description:** Establish the canonical sensor/event schema and create topics with sane partitioning so producers/consumers share a contract.
-- **Acceptance Criteria:** Avro/JSON schema versioned; topics `events.raw`, `events.scored`, `alerts` created via init script; partition/replication documented.
-- **Technical Steps:** 1) Define schema (timestamp, entity_id, metrics{}). 2) Topic-creation script. 3) Document partitioning by `entity_id`.
+- **Description:** Establish a single canonical `EventEnvelope` that wraps **both** dataset shapes (NAB univariate + SMD 38-dim multivariate) and manage Kafka topics declaratively, so every producer/consumer shares one contract. Schema and topics are co-designed because the envelope's `metrics` payload differs per dataset — this is why RTAD-002 and RTAD-003 are interconnected.
+- **Acceptance Criteria:** Versioned JSON `EventEnvelope` (with `dataset`, `stream_type`, `metrics{}`, ground-truth `is_anomaly`) documented in `/docs/schema.md`; topics `events.raw`, `events.scored`, `alerts` declared in `topics.yaml` and reconciled by an idempotent `topic_admin.py` (create / update-config / delete / list); partition + replication rationale documented (RF=2 for a 2-broker cluster; partition key = `entity_id`).
+- **Technical Steps:** 1) Define `EventEnvelope` (event_id, entity_id, dataset, stream_type, timestamp, ingest_ts, metrics{}, is_anomaly, sequence_idx). 2) Declare topics in `topics.yaml`. 3) Idempotent `topic_admin.py sync/delete/list` against the cluster. 4) Document partitioning by `entity_id` (ordering invariant required by the LSTM-AE sequence buffer). 5) Wire `make topics-sync`.
 - **Dependencies:** RTAD-001
-- **Config:** `EVENTS_TOPIC`, `SCORED_TOPIC`, `ALERTS_TOPIC`, `NUM_PARTITIONS=6`.
-- **DoD:** Topics auto-created on stack up; schema doc in `/docs`.
+- **Config:** `KAFKA_BOOTSTRAP_SERVERS`, `EVENTS_TOPIC`, `SCORED_TOPIC`, `ALERTS_TOPIC`; partitions 6/6/3, RF=2.
+- **DoD:** `make topics-sync` creates/updates topics idempotently; `EventEnvelope` schema doc lives in `/docs`; partition-key strategy documented.
 
-### RTAD-003 — Synthetic event generator
+### RTAD-003 — Dataset replay producers (NAB + SMD)
 
 - **Type:** Story · **Epic:** B Ingestion · **Priority:** High · **Points:** 3
-- **Description:** Build a configurable producer that emits realistic multivariate time-series with injectable anomalies for demos and tests.
-- **Acceptance Criteria:** Configurable rate + anomaly injection (point, contextual, collective); produces to `events.raw`; deterministic seed mode.
-- **Technical Steps:** 1) Generator with baseline + noise + drift. 2) Anomaly injection toggles. 3) CLI flags for rate/seed. 4) Dockerize as a service.
+- **Description:** Replay two **real, labeled** anomaly datasets into `events.raw` as if they were live telemetry, instead of generating synthetic data. NAB (58 univariate streams) feeds the Isolation Forest path; SMD (28 machines × 38 metrics) feeds the LSTM-AE path. Each row becomes an `EventEnvelope` keyed by `entity_id`, preserving the dataset's ground-truth anomaly labels for downstream evaluation.
+- **Acceptance Criteria:** `nab_producer.py` and `smd_producer.py` replay their datasets to `events.raw`; ground-truth labels mapped onto `is_anomaly`; configurable replay speed (0 = max throughput, 1.0 = wall-clock real time); per-stream / per-machine filter for fast local runs; deterministic per-`entity_id` ordering; one-command data acquisition into a gitignored `data/`.
+- **Technical Steps:** 1) Data acquisition tooling (clone NAB; fetch SMD `ServerMachineDataset`) into `data/`. 2) NAB CSV reader → EventEnvelope (univariate, label from `combined_labels.json`). 3) SMD reader → EventEnvelope (38-dim, label from `test_label/`). 4) Shared serialization + `entity_id`-keyed Kafka publish. 5) Replay-speed + filter via env/CLI. 6) Dockerize as a service.
 - **Dependencies:** RTAD-002
-- **Config:** `EVENT_RATE`, `ANOMALY_RATIO`, `SEED`.
-- **DoD:** Sustains ≥5k events/sec locally; anomalies labeled in a side topic for eval.
+- **Config:** `NAB_DATA_DIR`, `NAB_LABELS_FILE`, `NAB_REPLAY_SPEED`, `NAB_STREAM_FILTER`, `SMD_DATA_DIR`, `SMD_REPLAY_SPEED`, `SMD_MACHINE_FILTER`, `SMD_USE_TEST_SPLIT`.
+- **DoD:** Both datasets stream into `events.raw` with labels intact; replay speed + filters work; `data/` is gitignored; consumer (RTAD-004) observes ordered per-entity events.
 
 ### RTAD-004 — Streaming ingestion + feature windowing consumer
 
@@ -66,7 +66,7 @@
 - **Technical Steps:** 1) Sequence windowing dataset. 2) LSTM-AE module + train loop w/ early stopping. 3) Threshold calibration. 4) MLflow logging + TorchScript export.
 - **Dependencies:** RTAD-004
 - **Config:** `SEQ_LEN`, `HIDDEN_DIM`, `EPOCHS`, `LR`.
-- **DoD:** `anomaly-lstmae` registered; ROC-AUC reported on injected-anomaly eval set.
+- **DoD:** `anomaly-lstmae` registered; ROC-AUC reported on the SMD labeled test split.
 
 ### RTAD-007 — Champion–Challenger evaluation + promotion
 
@@ -86,7 +86,7 @@
 - **Technical Steps:** 1) Model loader from MLflow registry. 2) Scoring consumer. 3) Alert rule + cooldown. 4) Emit to topics + Postgres.
 - **Dependencies:** RTAD-004, RTAD-007
 - **Config:** `ALERT_COOLDOWN_S`, `MODEL_STAGE=Production`.
-- **DoD:** End-to-end: injected anomaly → alert in < 2s p95.
+- **DoD:** End-to-end: a labeled (NAB/SMD) anomaly → alert in < 2s p95.
 
 ### RTAD-009 — Alert/Query API (FastAPI)
 
@@ -132,7 +132,7 @@
 
 - **Type:** Task · **Epic:** G · **Priority:** High · **Points:** 5
 - **Description:** Cover feature windowing, model thresholds, promotion logic, and a full inject→alert e2e using Testcontainers.
-- **Acceptance Criteria:** ≥80% coverage on core libs; e2e asserts injected anomaly produces an alert; CI runs green.
+- **Acceptance Criteria:** ≥80% coverage on core libs; e2e asserts a labeled (NAB/SMD) anomaly produces an alert; CI runs green.
 - **Technical Steps:** 1) pytest unit tests. 2) Testcontainers Kafka/Postgres integration. 3) e2e harness. 4) GitHub Actions CI.
 - **Dependencies:** RTAD-008, RTAD-011
 - **Config:** `CI=true`.
