@@ -42,6 +42,9 @@ help:
 	@echo ""
 	@echo "  Data"
 	@echo "    fetch-data    Download NAB + SMD into data/ (idempotent)"
+	@echo ""
+	@echo "  Database"
+	@echo "    migrate       Apply feature-store schema (idempotent)"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -185,3 +188,23 @@ produce-nab:
 .PHONY: produce-smd
 produce-smd:
 	$(PYTHON) -m services.producer.smd_producer
+
+# -----------------------------------------------------------------------------
+# Database migrations
+# -----------------------------------------------------------------------------
+# Apply the consumer's feature-store DDL. The schema file is idempotent
+# (CREATE ... IF NOT EXISTS), so re-running is safe. DDL needs the table owner,
+# so this runs as the superuser (POSTGRES_USER) - application services connect
+# as the least-privilege nsapp user instead. The password is read from .env at
+# call time and passed through to the container as PGPASSWORD so psql never
+# prompts; it is never written into the Makefile or shell history.
+SCHEMA_FILE := services/consumer/schema.sql
+
+.PHONY: migrate
+migrate:
+	@PGUSER=$$(grep '^POSTGRES_USER=' $(ENV_FILE) | cut -d= -f2-); \
+	PGDB=$$(grep '^POSTGRES_DB=' $(ENV_FILE) | cut -d= -f2-); \
+	PGPW=$$(grep '^POSTGRES_PASSWORD=' $(ENV_FILE) | cut -d= -f2-); \
+	echo "Applying $(SCHEMA_FILE) to $$PGDB as $$PGUSER ..."; \
+	$(COMPOSE) exec -T -e PGPASSWORD="$$PGPW" postgres \
+		psql -v ON_ERROR_STOP=1 -U "$$PGUSER" -d "$$PGDB" < $(SCHEMA_FILE)
