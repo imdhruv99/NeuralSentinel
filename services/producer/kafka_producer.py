@@ -11,8 +11,8 @@ import time
 
 from kafka import KafkaProducer
 
-from config import ProducerConfig
-from envelope import EventEnvelope
+from services.producer.config import ProducerConfig
+from services.common.contracts import EventEnvelope
 
 
 def build_producer(cfg: ProducerConfig) -> KafkaProducer:

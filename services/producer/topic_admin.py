@@ -9,7 +9,7 @@ from kafka import KafkaAdminClient
 from kafka.admin import ConfigResource, ConfigResourceType, NewTopic
 from kafka.errors import KafkaError, TopicAlreadyExistsError, UnknownTopicOrPartitionError
 
-from config import ProducerConfig
+from services.producer.config import ProducerConfig
 
 
 def load_topic_definitions(path: Path) -> list[dict]:

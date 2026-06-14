@@ -151,10 +151,10 @@ filter env var to replay a single stream/machine for fast local runs:
 
 ```bash
 # Replay one NAB stream (univariate path)
-NAB_STREAM_FILTER=ec2_cpu_utilization_5f5533 venv/bin/python services/producer/nab_producer.py
+NAB_STREAM_FILTER=ec2_cpu_utilization_5f5533 venv/bin/python -m services.producer.nab_producer
 
 # Replay one SMD machine (multivariate path)
-SMD_MACHINE_FILTER=machine-1-1 venv/bin/python services/producer/smd_producer.py
+SMD_MACHINE_FILTER=machine-1-1 venv/bin/python -m services.producer.smd_producer
 ```
 
 Replay speed is controlled by `NAB_REPLAY_SPEED` / `SMD_REPLAY_SPEED`
@@ -171,8 +171,7 @@ Envelope serialization (no broker needed):
 
 ```bash
 python -c "
-import sys; sys.path.insert(0, 'services/producer')
-from envelope import EventEnvelope, Dataset, StreamType
+from services.common.contracts import EventEnvelope, Dataset, StreamType
 e = EventEnvelope(
     entity_id='NAB/smoke-test', dataset=Dataset.NAB,
     stream_type=StreamType.UNIVARIATE, timestamp='2014-04-11 00:00:00',
@@ -189,10 +188,9 @@ End-to-end publish (stack must be up):
 
 ```bash
 python -c "
-import sys; sys.path.insert(0, 'services/producer')
-from config import ProducerConfig
-from envelope import EventEnvelope, Dataset, StreamType
-from kafka_producer import build_producer, publish, flush_and_close
+from services.producer.config import ProducerConfig
+from services.common.contracts import EventEnvelope, Dataset, StreamType
+from services.producer.kafka_producer import build_producer, publish, flush_and_close
 cfg = ProducerConfig()
 p = build_producer(cfg)
 ev = EventEnvelope(

@@ -104,20 +104,22 @@ logs-mlflow:
 # ports (19091/19092), the same way the producers will run. I point at the
 # venv interpreter directly because `make` does not inherit an activated venv;
 # override with `make topics-sync PYTHON=python3` if your setup differs.
+# Services run as modules (python -m) so absolute package imports resolve from
+# the repo root.
 PYTHON      ?= venv/bin/python
-TOPIC_ADMIN := services/producer/topic_admin.py
+TOPIC_ADMIN := services.producer.topic_admin
 
 .PHONY: topics-sync
 topics-sync:
-	$(PYTHON) $(TOPIC_ADMIN) sync
+	$(PYTHON) -m $(TOPIC_ADMIN) sync
 
 .PHONY: topics-delete
 topics-delete:
-	$(PYTHON) $(TOPIC_ADMIN) delete
+	$(PYTHON) -m $(TOPIC_ADMIN) delete
 
 .PHONY: topics-list
 topics-list:
-	$(PYTHON) $(TOPIC_ADMIN) list
+	$(PYTHON) -m $(TOPIC_ADMIN) list
 
 # -----------------------------------------------------------------------------
 # Maintenance
@@ -172,3 +174,14 @@ fetch-smd:
 		rm -rf $(DATA_DIR)/_omnianomaly; \
 		echo "SMD extracted -> $(DATA_DIR)/SMD/ServerMachineDataset"; \
 	fi
+
+# -----------------------------------------------------------------------------
+# Producers (host execution, run as modules)
+# -----------------------------------------------------------------------------
+.PHONY: produce-nab
+produce-nab:
+	$(PYTHON) -m services.producer.nab_producer
+
+.PHONY: produce-smd
+produce-smd:
+	$(PYTHON) -m services.producer.smd_producer
