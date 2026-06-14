@@ -101,7 +101,7 @@ def sync_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
         except TopicAlreadyExistsError:
             # Race condition: another process created it between our list and create.
             # Safe to ignore - the topic exists, which is what we wanted.
-            print(" Some topics already existed (race condition) — continuing.")
+            print(" Some topics already existed (race condition) - continuing.")
         except KafkaError as exc:
             print(f" Create failed: {exc}", file=sys.stderr)
             raise
@@ -153,7 +153,7 @@ def delete_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
         time.sleep(2)
         print("Done.")
     except UnknownTopicOrPartitionError:
-        print("Some topics didn't exist — nothing to delete.")
+        print("Some topics didn't exist - nothing to delete.")
     except KafkaError as exc:
         print(f"Delete failed: {exc}", file=sys.stderr)
         raise

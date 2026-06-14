@@ -40,6 +40,8 @@ help:
 	@echo "    prune        docker system prune -f"
 	@echo "    pull         Pull latest images for all services"
 	@echo ""
+	@echo "  Data"
+	@echo "    fetch-data    Download NAB + SMD into data/ (idempotent)"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -133,3 +135,40 @@ prune:
 .PHONY: pull
 pull:
 	$(COMPOSE) pull
+
+# -----------------------------------------------------------------------------
+# Dataset acquisition (NAB + SMD)
+# -----------------------------------------------------------------------------
+# Datasets land in data/ (gitignored). I shallow-clone upstream repos
+# (--depth 1: latest tree only, no history) to keep the download small.
+#   NAB -> data/NAB                         (CSVs in data/, labels/combined_labels.json)
+#   SMD -> data/SMD/ServerMachineDataset    (extracted from the OmniAnomaly repo)
+# Paths here match the defaults in services/producer/config.py.
+DATA_DIR := data
+NAB_REPO := https://github.com/numenta/NAB.git
+SMD_REPO := https://github.com/NetManAIOps/OmniAnomaly.git
+
+.PHONY: fetch-data
+fetch-data: fetch-nab fetch-smd
+	@echo "Datasets ready under $(DATA_DIR)/."
+
+fetch-nab:
+	@if [ -d "$(DATA_DIR)/NAB/data" ]; then \
+		echo "NAB already present at $(DATA_DIR)/NAB — skipping."; \
+	else \
+		echo "Cloning NAB -> $(DATA_DIR)/NAB ..."; \
+		git clone --depth 1 $(NAB_REPO) $(DATA_DIR)/NAB; \
+	fi
+
+fetch-smd:
+	@if [ -d "$(DATA_DIR)/SMD/ServerMachineDataset" ]; then \
+		echo "SMD already present at $(DATA_DIR)/SMD/ServerMachineDataset — skipping."; \
+	else \
+		echo "Cloning OmniAnomaly (for SMD) ..."; \
+		rm -rf $(DATA_DIR)/_omnianomaly; \
+		git clone --depth 1 $(SMD_REPO) $(DATA_DIR)/_omnianomaly; \
+		mkdir -p $(DATA_DIR)/SMD; \
+		mv $(DATA_DIR)/_omnianomaly/ServerMachineDataset $(DATA_DIR)/SMD/ServerMachineDataset; \
+		rm -rf $(DATA_DIR)/_omnianomaly; \
+		echo "SMD extracted -> $(DATA_DIR)/SMD/ServerMachineDataset"; \
+	fi
