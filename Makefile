@@ -31,14 +31,17 @@ help:
 	@echo "    logs-mlflow  Tail MLflow logs"
 	@echo ""
 	@echo "  Kafka"
-	@echo "    topics       List Kafka topics"
-	@echo "    topic-create Create default NeuralSentinel topics"
+	@echo "    topics-sync   Create/update topics from topics.yaml (idempotent)"
+	@echo "    topics-delete Delete all declared topics (DESTRUCTIVE)"
+	@echo "    topics-list   List Kafka topics on the cluster"
 	@echo ""
 	@echo "  Maintenance"
 	@echo "    clean        down + remove named volumes (DESTRUCTIVE)"
 	@echo "    prune        docker system prune -f"
 	@echo "    pull         Pull latest images for all services"
 	@echo ""
+	@echo "  Data"
+	@echo "    fetch-data    Download NAB + SMD into data/ (idempotent)"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -94,28 +97,27 @@ logs-mlflow:
 	$(COMPOSE) logs -f mlflow
 
 # -----------------------------------------------------------------------------
-# Kafka helpers
+# Kafka topic automation (host execution)
 # -----------------------------------------------------------------------------
-KAFKA_BROKER  := kafka-broker-1
-KAFKA_INTERNAL := kafka-broker-1:9092,kafka-broker-2:9092,kafka-broker-3:9092
+# Topics are declared in services/producer/topics.yaml and reconciled by
+# topic_admin.py. These targets run on the HOST against the external listener
+# ports (19091/19092), the same way the producers will run. I point at the
+# venv interpreter directly because `make` does not inherit an activated venv;
+# override with `make topics-sync PYTHON=python3` if your setup differs.
+PYTHON      ?= venv/bin/python
+TOPIC_ADMIN := services/producer/topic_admin.py
 
-.PHONY: topics
-topics:
-	$(COMPOSE) exec $(KAFKA_BROKER) \
-		/opt/kafka/bin/kafka-topics.sh --bootstrap-server $(KAFKA_INTERNAL) --list
+.PHONY: topics-sync
+topics-sync:
+	$(PYTHON) $(TOPIC_ADMIN) sync
 
-.PHONY: topic-create
-topic-create:
-	$(COMPOSE) exec $(KAFKA_BROKER) \
-		/opt/kafka/bin/kafka-topics.sh --bootstrap-server $(KAFKA_INTERNAL) \
-		--create --if-not-exists --topic events.raw      --partitions 6 --replication-factor 3
-	$(COMPOSE) exec $(KAFKA_BROKER) \
-		/opt/kafka/bin/kafka-topics.sh --bootstrap-server $(KAFKA_INTERNAL) \
-		--create --if-not-exists --topic events.scored   --partitions 6 --replication-factor 3
-	$(COMPOSE) exec $(KAFKA_BROKER) \
-		/opt/kafka/bin/kafka-topics.sh --bootstrap-server $(KAFKA_INTERNAL) \
-		--create --if-not-exists --topic alerts          --partitions 3 --replication-factor 3
-	@echo "Topics created."
+.PHONY: topics-delete
+topics-delete:
+	$(PYTHON) $(TOPIC_ADMIN) delete
+
+.PHONY: topics-list
+topics-list:
+	$(PYTHON) $(TOPIC_ADMIN) list
 
 # -----------------------------------------------------------------------------
 # Maintenance
@@ -133,3 +135,40 @@ prune:
 .PHONY: pull
 pull:
 	$(COMPOSE) pull
+
+# -----------------------------------------------------------------------------
+# Dataset acquisition (NAB + SMD)
+# -----------------------------------------------------------------------------
+# Datasets land in data/ (gitignored). I shallow-clone upstream repos
+# (--depth 1: latest tree only, no history) to keep the download small.
+#   NAB -> data/NAB                         (CSVs in data/, labels/combined_labels.json)
+#   SMD -> data/SMD/ServerMachineDataset    (extracted from the OmniAnomaly repo)
+# Paths here match the defaults in services/producer/config.py.
+DATA_DIR := data
+NAB_REPO := https://github.com/numenta/NAB.git
+SMD_REPO := https://github.com/NetManAIOps/OmniAnomaly.git
+
+.PHONY: fetch-data
+fetch-data: fetch-nab fetch-smd
+	@echo "Datasets ready under $(DATA_DIR)/."
+
+fetch-nab:
+	@if [ -d "$(DATA_DIR)/NAB/data" ]; then \
+		echo "NAB already present at $(DATA_DIR)/NAB — skipping."; \
+	else \
+		echo "Cloning NAB -> $(DATA_DIR)/NAB ..."; \
+		git clone --depth 1 $(NAB_REPO) $(DATA_DIR)/NAB; \
+	fi
+
+fetch-smd:
+	@if [ -d "$(DATA_DIR)/SMD/ServerMachineDataset" ]; then \
+		echo "SMD already present at $(DATA_DIR)/SMD/ServerMachineDataset — skipping."; \
+	else \
+		echo "Cloning OmniAnomaly (for SMD) ..."; \
+		rm -rf $(DATA_DIR)/_omnianomaly; \
+		git clone --depth 1 $(SMD_REPO) $(DATA_DIR)/_omnianomaly; \
+		mkdir -p $(DATA_DIR)/SMD; \
+		mv $(DATA_DIR)/_omnianomaly/ServerMachineDataset $(DATA_DIR)/SMD/ServerMachineDataset; \
+		rm -rf $(DATA_DIR)/_omnianomaly; \
+		echo "SMD extracted -> $(DATA_DIR)/SMD/ServerMachineDataset"; \
+	fi
