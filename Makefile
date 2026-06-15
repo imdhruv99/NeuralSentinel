@@ -42,6 +42,14 @@ help:
 	@echo ""
 	@echo "  Data"
 	@echo "    fetch-data    Download NAB + SMD into data/ (idempotent)"
+	@echo ""
+	@echo "  Database"
+	@echo "    migrate       Apply feature-store schema (idempotent)"
+	@echo ""
+	@echo "  Pipeline"
+	@echo "    produce-nab   Replay the NAB dataset into events.raw"
+	@echo "    produce-smd   Replay the SMD dataset into events.raw"
+	@echo "    consume       Run the feature-windowing consumer (Ctrl-C to drain)"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -104,20 +112,22 @@ logs-mlflow:
 # ports (19091/19092), the same way the producers will run. I point at the
 # venv interpreter directly because `make` does not inherit an activated venv;
 # override with `make topics-sync PYTHON=python3` if your setup differs.
+# Services run as modules (python -m) so absolute package imports resolve from
+# the repo root.
 PYTHON      ?= venv/bin/python
-TOPIC_ADMIN := services/producer/topic_admin.py
+TOPIC_ADMIN := services.producer.topic_admin
 
 .PHONY: topics-sync
 topics-sync:
-	$(PYTHON) $(TOPIC_ADMIN) sync
+	$(PYTHON) -m $(TOPIC_ADMIN) sync
 
 .PHONY: topics-delete
 topics-delete:
-	$(PYTHON) $(TOPIC_ADMIN) delete
+	$(PYTHON) -m $(TOPIC_ADMIN) delete
 
 .PHONY: topics-list
 topics-list:
-	$(PYTHON) $(TOPIC_ADMIN) list
+	$(PYTHON) -m $(TOPIC_ADMIN) list
 
 # -----------------------------------------------------------------------------
 # Maintenance
@@ -172,3 +182,45 @@ fetch-smd:
 		rm -rf $(DATA_DIR)/_omnianomaly; \
 		echo "SMD extracted -> $(DATA_DIR)/SMD/ServerMachineDataset"; \
 	fi
+
+# -----------------------------------------------------------------------------
+# Producers (host execution, run as modules)
+# -----------------------------------------------------------------------------
+.PHONY: produce-nab
+produce-nab:
+	$(PYTHON) -m services.producer.nab_producer
+
+.PHONY: produce-smd
+produce-smd:
+	$(PYTHON) -m services.producer.smd_producer
+
+# -----------------------------------------------------------------------------
+# Consumer (host execution, run as module)
+# -----------------------------------------------------------------------------
+# Streams events.raw -> rolling-window features -> Postgres (+ Redis cache).
+# Long-running: it polls until interrupted, then drains trailing windows and
+# commits offsets on a cooperative SIGINT (Ctrl-C). Run `make migrate` first so
+# the features table exists.
+.PHONY: consume
+consume:
+	$(PYTHON) -m services.consumer.main
+
+# -----------------------------------------------------------------------------
+# Database migrations
+# -----------------------------------------------------------------------------
+# Apply the consumer's feature-store DDL. The schema file is idempotent
+# (CREATE ... IF NOT EXISTS), so re-running is safe. DDL needs the table owner,
+# so this runs as the superuser (POSTGRES_USER) - application services connect
+# as the least-privilege nsapp user instead. The password is read from .env at
+# call time and passed through to the container as PGPASSWORD so psql never
+# prompts; it is never written into the Makefile or shell history.
+SCHEMA_FILE := services/consumer/schema.sql
+
+.PHONY: migrate
+migrate:
+	@PGUSER=$$(grep '^POSTGRES_USER=' $(ENV_FILE) | cut -d= -f2-); \
+	PGDB=$$(grep '^POSTGRES_DB=' $(ENV_FILE) | cut -d= -f2-); \
+	PGPW=$$(grep '^POSTGRES_PASSWORD=' $(ENV_FILE) | cut -d= -f2-); \
+	echo "Applying $(SCHEMA_FILE) to $$PGDB as $$PGUSER ..."; \
+	$(COMPOSE) exec -T -e PGPASSWORD="$$PGPW" postgres \
+		psql -v ON_ERROR_STOP=1 -U "$$PGUSER" -d "$$PGDB" < $(SCHEMA_FILE)

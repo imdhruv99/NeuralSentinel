@@ -3,9 +3,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from config import ProducerConfig
-from envelope import EventEnvelope, Dataset, StreamType
-from kafka_producer import build_producer, publish, flush_and_close
+from services.producer.config import ProducerConfig
+from services.common.contracts import EventEnvelope, Dataset, StreamType
+from services.producer.kafka_producer import build_producer, publish, flush_and_close
 
 # SMD rows are 38-dimensional vectors of sensor readings.
 # Name the metrics positionally because the dataset ships without headers.

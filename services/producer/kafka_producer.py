@@ -5,78 +5,106 @@ Both nab_producer and smd_producer build EventEnvelopes; this module owns the
 single concern of "getting them onto the broker correctly"; the connection,
 the performance knobs from ProducerConfig, and (most importantly) keying every
 message by entity_id so per-stream ordering is preserved.
+
+Backed by confluent-kafka (librdkafka). Unlike kafka-python's send(), produce()
+enqueues into a bounded local buffer and is fully asynchronous; delivery results
+arrive on a background thread and are surfaced through _on_delivery.
 """
 
-import time
+import logging
 
-from kafka import KafkaProducer
+from confluent_kafka import Producer
 
-from config import ProducerConfig
-from envelope import EventEnvelope
+from services.producer.config import ProducerConfig
+from services.common.contracts import EventEnvelope
+
+logger = logging.getLogger(__name__)
 
 
-def build_producer(cfg: ProducerConfig) -> KafkaProducer:
+def _on_delivery(err, msg) -> None:
+    """Per-message delivery report (called from poll()/flush()).
+
+    Success is silent; a failure here means the record never reached the broker
+    after all retries, so it's logged loudly. The key is included because that's
+    the entity_id, which tells us which stream lost data."""
+    if err is not None:
+        key = msg.key().decode("utf-8", "replace") if msg.key() else "<none>"
+        logger.error("delivery failed for key=%s: %s", key, err)
+
+
+def build_producer(cfg: ProducerConfig) -> Producer:
     """
-    Construct a KafkaProducer from configuration.
+    Construct a confluent-kafka Producer from configuration.
 
-    Serialize in the producers (envelope.to_json()), so value_serializer
-    is left as identity bytes. The key is the entity_id encoded to UTF-8.
-    Kafka hashes the key bytes to choose the partition, so encoding must be stable.
+    librdkafka takes a flat config dict with dotted keys. Values are serialized
+    by the caller (envelope.to_json_bytes()), so there's no value serializer
+    here. bootstrap.servers accepts the raw comma-separated string directly.
     """
 
-    return KafkaProducer(
-        bootstrap_servers=cfg.kafka_bootstrap_servers.split(","),
-        client_id="neural-sentinel-producer",
+    conf = {
+        "bootstrap.servers": cfg.kafka_bootstrap_servers,
+        "client.id": "neural-sentinel-producer",
 
         # --- delivery guarantees ---
-        # acks="all": wait for all in-sync replicas to ack before considering the
-        # send successful. With RF=2 this means both replicas have the record.
-        # no silent data loss if a broker dies right after publish.
-        acks="all",
-
-        # Bounded retries for transient errors (leader election, brief timeouts).
-        retries=3,
-
-        # With idempotence on, retries can't create duplicates or reorder records
-        # within a partition. Costs nothing meaningful for our throughput.
-        enable_idempotence=True,
+        # enable.idempotence implies acks=all and bounds in-flight requests so
+        # retries can't duplicate or reorder within a partition. librdkafka sets
+        # acks=all itself, but we state it for documentation.
+        "enable.idempotence": True,
+        "acks": "all",
+        "retries": 3,
 
         # --- throughput knobs ---
-        batch_size=cfg.producer_batch_size,
-        linger_ms=cfg.producer_linger_ms,
-        compression_type=(
-            None if cfg.producer_compression == "none" else cfg.producer_compression
-        ),
-    )
+        # linger.ms lets librdkafka accumulate a batch before sending; compression
+        # is applied per batch. Our JSON compresses ~4-6x.
+        "linger.ms": cfg.producer_linger_ms,
+        "batch.size": cfg.producer_batch_size,
+        "compression.type": cfg.producer_compression,  # "none" is valid here
+    }
+    return Producer(conf)
 
 
-def publish(producer: KafkaProducer, topic: str, event: EventEnvelope) -> None:
+def publish(producer: Producer, topic: str, event: EventEnvelope) -> None:
     """
     Publish one envelope, keyed by entity_id to the given topic.
 
-    The key is what enforces the ordering invariant: kafka computes partition = hash(key) % num_partitions,
-    so every event for a given stream lands on the same partition and is therefore consumed in order.
-    This is hard requirement for the LSTM-AE sequence buffer to work correctly.
+    The key enforces the ordering invariant: Kafka computes partition =
+    hash(key) % num_partitions, so every event for a stream lands on the same
+    partition and is consumed in order. Hard requirement for the LSTM-AE buffer.
 
-    I do not block on the returned future here, that would serialize every send and destroy throughput.
-    The producer batches in the background; the caller flushes once at the end of the replay.
+    produce() is asynchronous: it enqueues into librdkafka's local buffer and
+    returns immediately. That buffer is bounded (queue.buffering.max.messages),
+    so a fast replay can fill it -> produce() raises BufferError. The fix is to
+    poll(), which serves delivery callbacks and drains the queue, then retry.
+    The trailing poll(0) is non-blocking and just keeps callbacks flowing.
     """
 
-    producer.send(
-        topic,
-        key=event.entity_id.encode("utf-8"),
-        value=event.to_json_bytes(),
-    )
+    while True:
+        try:
+            producer.produce(
+                topic,
+                key=event.entity_id.encode("utf-8"),
+                value=event.to_json_bytes(),
+                on_delivery=_on_delivery,
+            )
+            break
+        except BufferError:
+            # Queue full: block briefly to let in-flight sends complete, freeing
+            # space, then retry the same record.
+            producer.poll(0.5)
+    producer.poll(0)
 
 
-def flush_and_close(producer: KafkaProducer) -> None:
+def flush_and_close(producer: Producer) -> None:
     """
-    Flush buffered records and close the producer cleanly.
+    Flush buffered records before exiting.
 
-    flush() blocks until every buffered record has been acked (or finally failed).
-    Always call this before exiting the process, otherwise some records still sitting in the
-    in-memory batch are lost when the process ends.
+    flush() blocks until every queued record has a delivery result (acked or
+    finally failed) and returns the count still in queue. confluent-kafka has no
+    explicit close() — flushing is what guarantees nothing buffered is lost when
+    the process ends.
     """
 
-    producer.flush()
-    producer.close()
+    remaining = producer.flush(30)
+    if remaining > 0:
+        logger.warning(
+            "%d message(s) still undelivered after flush timeout", remaining)

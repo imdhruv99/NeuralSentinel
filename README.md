@@ -112,8 +112,8 @@ labels are preserved on the `is_anomaly` field for downstream evaluation.
 
 | File | Responsibility |
 |---|---|
-| `envelope.py` | Canonical `EventEnvelope` model — the single source of truth for the on-the-wire message shape, shared by producers and (later) consumers. |
-| `kafka_producer.py` | Builds the `KafkaProducer` from config and publishes each envelope keyed by `entity_id`. Owns delivery semantics (`acks=all`, idempotence, batching). |
+| `services/common/contracts.py` | Canonical `EventEnvelope` model — the single source of truth for the on-the-wire message shape, shared by producers and the consumer. |
+| `kafka_producer.py` | Builds the `confluent_kafka.Producer` from config and publishes each envelope keyed by `entity_id`. Owns delivery semantics (`acks=all`, idempotence, batching, delivery-report callback). |
 | `nab_producer.py` | Walks NAB CSVs row-by-row, maps anomaly timestamps onto `is_anomaly`, and replays each stream. |
 | `smd_producer.py` | Walks SMD machine files, parses 38-dim rows, attaches row-aligned test labels, and synthesizes a monotonic timestamp per row. |
 
@@ -151,10 +151,10 @@ filter env var to replay a single stream/machine for fast local runs:
 
 ```bash
 # Replay one NAB stream (univariate path)
-NAB_STREAM_FILTER=ec2_cpu_utilization_5f5533 venv/bin/python services/producer/nab_producer.py
+NAB_STREAM_FILTER=ec2_cpu_utilization_5f5533 venv/bin/python -m services.producer.nab_producer
 
 # Replay one SMD machine (multivariate path)
-SMD_MACHINE_FILTER=machine-1-1 venv/bin/python services/producer/smd_producer.py
+SMD_MACHINE_FILTER=machine-1-1 venv/bin/python -m services.producer.smd_producer
 ```
 
 Replay speed is controlled by `NAB_REPLAY_SPEED` / `SMD_REPLAY_SPEED`
@@ -171,8 +171,7 @@ Envelope serialization (no broker needed):
 
 ```bash
 python -c "
-import sys; sys.path.insert(0, 'services/producer')
-from envelope import EventEnvelope, Dataset, StreamType
+from services.common.contracts import EventEnvelope, Dataset, StreamType
 e = EventEnvelope(
     entity_id='NAB/smoke-test', dataset=Dataset.NAB,
     stream_type=StreamType.UNIVARIATE, timestamp='2014-04-11 00:00:00',
@@ -189,10 +188,9 @@ End-to-end publish (stack must be up):
 
 ```bash
 python -c "
-import sys; sys.path.insert(0, 'services/producer')
-from config import ProducerConfig
-from envelope import EventEnvelope, Dataset, StreamType
-from kafka_producer import build_producer, publish, flush_and_close
+from services.producer.config import ProducerConfig
+from services.common.contracts import EventEnvelope, Dataset, StreamType
+from services.producer.kafka_producer import build_producer, publish, flush_and_close
 cfg = ProducerConfig()
 p = build_producer(cfg)
 ev = EventEnvelope(
@@ -210,3 +208,70 @@ Expected: `published + flushed OK`. The message is visible in Kafka UI
 (http://localhost:18080) under the `events.raw` topic.
 
 ---
+
+## Feature Windowing Consumer
+
+The consumer is the other half of the ingestion pipeline: it reads raw events
+from `events.raw`, groups them per `entity_id`, computes rolling-window features
+over **event time**, and persists each window to Postgres (offline training
+store) while caching the latest window per entity in Redis (online scoring).
+
+Event time — not wall-clock — is the time axis. The producers replay at max
+throughput, so an entire stream arrives in seconds; windows are cut on each
+event's own `timestamp`, which makes the feature output identical regardless of
+replay speed.
+
+### Module layout
+
+| File | Responsibility |
+|---|---|
+| `config.py` | `ConsumerConfig` (pydantic-settings) — Kafka, window sizing, Postgres DSN, Redis, batching knobs, all overridable via `.env`. |
+| `schema.sql` | `features` table DDL. Primary key `(entity_id, window_end)` is what makes writes idempotent. |
+| `windowing.py` | Pure, I/O-free windowing engine. Per-entity buffers, epoch-aligned sliding windows, and the mean/std/min/max/slope feature computation. Unit-testable in isolation. |
+| `sinks.py` | `FeatureSink` — batched `INSERT ... ON CONFLICT DO NOTHING` into Postgres plus a best-effort Redis cache of the latest window per entity. |
+| `main.py` | The poll → window → persist → commit loop. Manual offset commits happen **after** a durable write, and SIGINT drains trailing windows before exit. |
+
+### Delivery semantics
+
+Writes are **persist-before-commit**: a batch is written to Postgres *before* its
+Kafka offsets are committed. A crash between the two replays the batch, and the
+`(entity_id, window_end)` primary key dedups it via `ON CONFLICT DO NOTHING`. The
+result is at-least-once delivery plus idempotent writes — effectively-once
+features. The whole Kafka layer (producer, consumer, topic admin) runs on
+`confluent-kafka` (librdkafka).
+
+### Window labels
+
+Each window carries a three-state `label`:
+
+| Value | Meaning |
+|---|---|
+| `true` | The window contains at least one ground-truth anomaly. |
+| `false` | The window is known-normal (all events labeled normal). |
+| `null` | Unlabeled (e.g. the SMD train split) — deliberately preserved, **not** collapsed to `false`. |
+
+### Running the consumer
+
+The stack must be up, topics created, and the schema applied:
+
+```bash
+make migrate        # create the features table (idempotent)
+make consume        # start the consumer; Ctrl-C drains and exits cleanly
+```
+
+Then drive data through it from another shell:
+
+```bash
+make produce-nab    # and/or: make produce-smd
+```
+
+Query the resulting feature store:
+
+```sql
+SELECT dataset, stream_type, count(*) FROM features GROUP BY 1, 2;
+SELECT entity_id, window_start, window_end, event_count, features
+FROM features ORDER BY window_end DESC LIMIT 5;
+```
+
+The latest window per entity is also cached in Redis under
+`features:latest:<entity_id>` as a JSON blob.

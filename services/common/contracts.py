@@ -2,7 +2,7 @@
 The canonical Kafka message for events.raw / events.scored.
 
 This module is the single source of truth for the on-the-wire shape. Producers
-build envelopes; the consumer and scorer will import this exact model so the
+build envelopes; the consumer and scorer import this exact model so the
 contract is defined in one place and validated by pydantic on both ends.
 """
 
