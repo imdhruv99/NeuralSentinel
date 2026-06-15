@@ -6,7 +6,10 @@ Real-time anomaly detection and alerting for high-volume sensor and event stream
 
 The NeuralSentinel infrastructure is modularized using Docker Compose, separating services into distinct compose files linked via a root configuration.
 
-- **Kafka:** Runs in KRaft mode (no ZooKeeper dependency) with a 3-broker cluster, designed for production-aligned fault tolerance. The setup splits internal, external, and controller listeners for proper traffic separation. Includes Kafka UI for cluster management.
+- **Kafka:** Runs in KRaft mode (no ZooKeeper dependency) with a 2-broker data
+  cluster plus a dedicated controller node, designed for production-aligned
+  fault tolerance. The setup splits internal, external, and controller listeners
+  for proper traffic separation. Includes Kafka UI for cluster management.
 - **PostgreSQL:** Uses a custom `postgresql.conf` mounted read-only for version-controlled tuning. An initialization script (`init.sql`) automatically creates the `mlflow` database and a least-privilege `nsapp` user. Includes pgAdmin for database administration.
 - **Redis:** Configured with persistence (`appendonly yes` and RDB snapshots) to ensure data survives container restarts. Memory is capped at 300MB with an `allkeys-lru` eviction policy, optimized for cache use-cases. Includes a Redis UI.
 - **MLflow:** Configured with PostgreSQL as the backend store and a local volume for artifact storage.
@@ -18,6 +21,7 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 ```text
 .
 ├── docs
+│   ├── Realtime_Anomaly_Detection.md
 │   ├── schema.md
 │   └── Tickets.md
 ├── infra
@@ -32,16 +36,31 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 │   ├── postgres-docker-compose.yaml
 │   └── redis-docker-compose.yaml
 ├── services
-│   └── producer
-│       ├── config.py
-│       ├── topic_admin.py
-│       └── topics.yaml
+│   ├── common
+│   │   └── contracts.py          # EventEnvelope — shared on-the-wire contract
+│   ├── producer                  # dataset replay → events.raw
+│   │   ├── config.py
+│   │   ├── kafka_producer.py
+│   │   ├── nab_producer.py
+│   │   ├── smd_producer.py
+│   │   ├── topic_admin.py
+│   │   └── topics.yaml
+│   ├── consumer                  # events.raw → windowed features → Postgres/Redis
+│   │   ├── config.py
+│   │   ├── windowing.py          # pure event-time windowing engine
+│   │   ├── sinks.py              # Postgres upsert + Redis cache
+│   │   ├── main.py               # poll → window → persist → commit loop
+│   │   └── schema.sql            # features table DDL
+│   ├── scorer                    # (planned) anomaly scoring → events.scored
+│   └── alert-api                 # (planned) threshold alerts → alerts
+├── requirements.txt
 ├── Makefile
 └── README.md
 
 ```
 
-- Note: data directory will be created after running the compose.
+- Note: the `data/` directory (datasets) and `venv/` are created locally and are
+  gitignored.
 
 ---
 
@@ -220,6 +239,76 @@ Event time — not wall-clock — is the time axis. The producers replay at max
 throughput, so an entire stream arrives in seconds; windows are cut on each
 event's own `timestamp`, which makes the feature output identical regardless of
 replay speed.
+
+### What is windowing?
+
+A **window** is a fixed slice of time over one stream. Windowing chops a
+continuous, never-ending sequence of events into those slices, then reduces each
+slice to a single summary row. Instead of "here is event #1,234,567," you get
+"here is what this stream looked like between 09:00 and 09:15."
+
+```text
+stream of events (one entity, by event-time):
+  • • •  • • • • •   • •  • • • •  • •   →  (keeps arriving)
+  └── window 1 ──┘└── window 2 ──┘└── window 3 ──┘
+        │               │               │
+        ▼               ▼               ▼
+   one feature row  one feature row  one feature row
+   (mean, std,      (mean, std,      (mean, std,
+    min, max,        min, max,        min, max,
+    slope, count)    slope, count)    slope, count)
+```
+
+Each window has two parameters: a **size** (how wide the slice is) and a
+**slide** (how far you move before cutting the next one). Everything else —
+tumbling vs sliding, the boundary math, the features — builds on those two ideas.
+
+### Why windowing?
+
+A single raw reading - one CPU sample, one latency number - carries almost no
+signal on its own. "CPU is 80%" only means something next to what CPU *usually*
+is and how fast it's *moving*. Anomalies live in that context, not in the point.
+Windowing is how the consumer rebuilds that context from a flat stream.
+
+The job it does is threefold:
+
+- **Bounds an unbounded stream.** Kafka delivers an endless sequence of events;
+  models train and score on fixed-size rows. A window collapses "all events for
+  this entity between two timestamps" into exactly one feature row — turning a
+  firehose into a table.
+- **Adds temporal context.** Each window summarizes recent history (mean, spread,
+  range, trend) so the detector sees *behavior over time*, not isolated samples.
+  This is precisely the context the Isolation Forest and LSTM-AE need.
+- **Aligns ragged streams.** NAB streams tick every 5 minutes, SMD every minute;
+  different entities start and stop at different points. Cutting every stream on
+  the same epoch-aligned boundaries makes their feature rows directly comparable.
+
+**Tumbling vs sliding.** A window is defined by a *size* (how much history it
+covers) and a *slide* (how far time advances between rows). When `slide == size`
+the windows are **tumbling** — back-to-back, non-overlapping (the current
+default: 900s / 900s). When `slide < size` they **slide** — overlapping, which
+scores more often and reacts faster at the cost of more rows. Both are the same
+engine; only `WINDOW_SIZE_S` and `SLIDE_S` change.
+
+**Boundaries are driven by data, not the clock.** Each entity keeps its own
+buffer. As events arrive, their event-time acts as a *watermark*: when it crosses
+a window boundary, every window up to that point is emitted and old events are
+evicted. A window covers the half-open interval `[end - size, end)`, so no event
+is counted twice. On shutdown, the trailing partial window is flushed so nothing
+is silently dropped.
+
+**The features per window** (computed in `windowing.py`, no I/O):
+
+| Feature | What it captures |
+|---|---|
+| `mean` | The window's baseline level. |
+| `std` | Volatility / spread — population standard deviation (`0` for a single sample). |
+| `min` / `max` | The extremes reached in the window. |
+| `slope` | Direction and rate of change `(last - first) / span` — is it trending up or down? |
+| `event_count` | How many raw events backed this window (density / confidence). |
+
+For SMD's 38 dimensions these are computed **per metric**, so the feature row is
+a map of `{metric: {mean, std, …}}` rather than a flat set of numbers.
 
 ### Module layout
 
