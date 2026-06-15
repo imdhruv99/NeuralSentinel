@@ -28,7 +28,7 @@
 - **Config:** `KAFKA_BOOTSTRAP_SERVERS`, `EVENTS_TOPIC`, `SCORED_TOPIC`, `ALERTS_TOPIC`; partitions 6/6/3, RF=2.
 - **DoD:** `make topics-sync` creates/updates topics idempotently; `EventEnvelope` schema doc lives in `/docs`; partition-key strategy documented.
 
-### RTAD-003 — Dataset replay producers (NAB + SMD)
+### RTAD-003 — Dataset replay producers (NAB + SMD) - COMPLETED
 
 - **Type:** Story · **Epic:** B Ingestion · **Priority:** High · **Points:** 3
 - **Description:** Replay two **real, labeled** anomaly datasets into `events.raw` as if they were live telemetry, instead of generating synthetic data. NAB (58 univariate streams) feeds the Isolation Forest path; SMD (28 machines × 38 metrics) feeds the LSTM-AE path. Each row becomes an `EventEnvelope` keyed by `entity_id`, preserving the dataset's ground-truth anomaly labels for downstream evaluation.
@@ -38,7 +38,7 @@
 - **Config:** `NAB_DATA_DIR`, `NAB_LABELS_FILE`, `NAB_REPLAY_SPEED`, `NAB_STREAM_FILTER`, `SMD_DATA_DIR`, `SMD_REPLAY_SPEED`, `SMD_MACHINE_FILTER`, `SMD_USE_TEST_SPLIT`.
 - **DoD:** Both datasets stream into `events.raw` with labels intact; replay speed + filters work; `data/` is gitignored; consumer (RTAD-004) observes ordered per-entity events.
 
-### RTAD-004 — Streaming ingestion + feature windowing consumer
+### RTAD-004 — Streaming ingestion + feature windowing consumer - COMPLETED
 
 - **Type:** Story · **Epic:** B · **Priority:** High · **Points:** 5
 - **Description:** Consume `events.raw`, compute rolling-window features per entity, and persist to Postgres for training and to Redis for online scoring.

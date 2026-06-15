@@ -45,6 +45,11 @@ help:
 	@echo ""
 	@echo "  Database"
 	@echo "    migrate       Apply feature-store schema (idempotent)"
+	@echo ""
+	@echo "  Pipeline"
+	@echo "    produce-nab   Replay the NAB dataset into events.raw"
+	@echo "    produce-smd   Replay the SMD dataset into events.raw"
+	@echo "    consume       Run the feature-windowing consumer (Ctrl-C to drain)"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -188,6 +193,17 @@ produce-nab:
 .PHONY: produce-smd
 produce-smd:
 	$(PYTHON) -m services.producer.smd_producer
+
+# -----------------------------------------------------------------------------
+# Consumer (host execution, run as module)
+# -----------------------------------------------------------------------------
+# Streams events.raw -> rolling-window features -> Postgres (+ Redis cache).
+# Long-running: it polls until interrupted, then drains trailing windows and
+# commits offsets on a cooperative SIGINT (Ctrl-C). Run `make migrate` first so
+# the features table exists.
+.PHONY: consume
+consume:
+	$(PYTHON) -m services.consumer.main
 
 # -----------------------------------------------------------------------------
 # Database migrations

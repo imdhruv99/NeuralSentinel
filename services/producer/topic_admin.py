@@ -5,9 +5,14 @@ import argparse
 
 from pathlib import Path
 
-from kafka import KafkaAdminClient
-from kafka.admin import ConfigResource, ConfigResourceType, NewTopic
-from kafka.errors import KafkaError, TopicAlreadyExistsError, UnknownTopicOrPartitionError
+from confluent_kafka import KafkaException, KafkaError
+from confluent_kafka.admin import (
+    AdminClient,
+    NewTopic,
+    ConfigResource,
+    ConfigEntry,
+    AlterConfigOpType,
+)
 
 from services.producer.config import ProducerConfig
 
@@ -33,25 +38,25 @@ def load_topic_definitions(path: Path) -> list[dict]:
     return topics
 
 
-def build_admin_client(config: ProducerConfig) -> KafkaAdminClient:
+def build_admin_client(config: ProducerConfig) -> AdminClient:
     """
     Create an AdminClient pointed at our broker list.
 
-    retry_backoff_ms and request_timeout_ms are tuned for local Docker:
-    brokers are on the same machine so latency is negligible, but during
-    startup there's a window where brokers are up but not yet ready to
-    accept admin requests. A generous timeout avoids false failures.
+    librdkafka takes a flat config dict. bootstrap.servers accepts the raw
+    comma-separated string. Admin operations carry their own per-call timeouts
+    (request_timeout / operation_timeout), so there's nothing to tune here for
+    the local Docker startup window beyond pointing at the brokers.
     """
 
-    return KafkaAdminClient(
-        bootstrap_servers=config.kafka_bootstrap_servers,
-        client_id="neural-sentinel-topic-admin",
-        request_timeout_ms=30_000,
-        retry_backoff_ms=500,
+    return AdminClient(
+        {
+            "bootstrap.servers": config.kafka_bootstrap_servers,
+            "client.id": "neural-sentinel-topic-admin",
+        }
     )
 
 
-def sync_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
+def sync_topics(admin: AdminClient, definitions: list[dict]) -> None:
     """
     Idempotent sync: create topics that don't exist, update config on those that do.
 
@@ -65,9 +70,15 @@ def sync_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
        do NOT attempt to change partition count or replication factor on existing
        topics because Kafka requires a full delete+recreate for that, which is
        destructive. If you need to change those, run `make topics-delete` first.
+
+    confluent-kafka's admin calls are async: each returns a dict {name: Future}.
+    The request only really succeeds/fails when you call future.result(), which
+    re-raises as a KafkaException carrying a KafkaError code.
     """
 
-    existing_topics = set(admin.list_topics())
+    # list_topics() returns cluster metadata (includes internal topics like
+    # __consumer_offsets); we only diff against our own declared names.
+    existing_topics = set(admin.list_topics(timeout=10).topics.keys())
     print(f"Cluster currently has {len(existing_topics)} topic(s).")
 
     to_create = []
@@ -75,15 +86,15 @@ def sync_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
 
     for defs in definitions:
         name = defs["name"]
-        topic_config = {k: str(v)for k, v in defs.get("config", {}).items()}
+        topic_config = {k: str(v) for k, v in defs.get("config", {}).items()}
 
         if name not in existing_topics:
             to_create.append(
                 NewTopic(
-                    name=name,
+                    name,
                     num_partitions=defs["partitions"],
                     replication_factor=defs["replication_factor"],
-                    topic_configs=topic_config,
+                    config=topic_config,
                 )
             )
         else:
@@ -94,43 +105,55 @@ def sync_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
         print(f"\n Creating {len(to_create)} new topic(s):")
         for t in to_create:
             print(
-                f"  + {t.name}  (partitions={t.num_partitions}, rf={t.replication_factor})")
-        try:
-            admin.create_topics(new_topics=to_create, validate_only=False)
-            print(" Topics are Created successfully.")
-        except TopicAlreadyExistsError:
-            # Race condition: another process created it between our list and create.
-            # Safe to ignore - the topic exists, which is what we wanted.
-            print(" Some topics already existed (race condition) - continuing.")
-        except KafkaError as exc:
-            print(f" Create failed: {exc}", file=sys.stderr)
-            raise
+                f"  + {t.topic}  (partitions={t.num_partitions}, rf={t.replication_factor})")
+        futures = admin.create_topics(to_create)
+        for name, fut in futures.items():
+            try:
+                fut.result()  # blocks until the controller acks this topic
+                print(f"  created {name}")
+            except KafkaException as exc:
+                # Race condition: another process created it between our list and
+                # create. Safe to ignore — the topic exists, which is the goal.
+                if exc.args[0].code() == KafkaError.TOPIC_ALREADY_EXISTS:
+                    print(f"  {name} already existed (race) - continuing.")
+                else:
+                    print(f" Create failed for {name}: {exc}", file=sys.stderr)
+                    raise
     else:
         print("\nNo new topics to create.")
 
     # Update configs for existing topics
     if to_update:
         print(f"\n Updating config on {len(to_update)} existing topic(s):")
-        for name, cfg_map in to_update:
-            print(f"  ~ {name}")
-            resources = [
-                ConfigResource(
-                    resource_type=ConfigResourceType.TOPIC,
-                    name=name,
-                    configs=cfg_map,
-                )
-            ]
+        # incremental_alter_configs only touches the keys we name (SET each one)
+        # and leaves every other broker-managed config untouched — unlike the
+        # deprecated alter_configs, which replaced the whole config map.
+        resources = [
+            ConfigResource(
+                ConfigResource.Type.TOPIC,
+                name,
+                incremental_configs=[
+                    ConfigEntry(
+                        k, v, incremental_operation=AlterConfigOpType.SET)
+                    for k, v in cfg_map.items()
+                ],
+            )
+            for name, cfg_map in to_update
+        ]
+        futures = admin.incremental_alter_configs(resources)
+        for res, fut in futures.items():
             try:
-                admin.alter_configs(resources)
-                print(f" Config updated.")
-            except KafkaError as exc:
-                print(f" Config update failed: {exc}", file=sys.stderr)
+                fut.result()
+                print(f"  ~ {res.name} config updated.")
+            except KafkaException as exc:
+                print(f" Config update failed for {res.name}: {exc}",
+                      file=sys.stderr)
                 raise
     else:
         print("No existing topics to update.")
 
 
-def delete_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
+def delete_topics(admin: AdminClient, definitions: list[dict]) -> None:
     """
     Delete all topics declared in topics.yaml.
 
@@ -138,30 +161,33 @@ def delete_topics(admin: KafkaAdminClient, definitions: list[dict]) -> None:
     dev workflow where you want a clean slate (e.g. after changing partition
     count, which requires delete + recreate).
 
-    Sleep briefly after deletion because Kafka's delete is asynchronous:
-    the broker marks the topic for deletion and the actual log cleanup happens
-    in the background. If you immediately call create after delete you may hit
-    a "topic already exists" error from the lingering metadata. 2 seconds is
-    usually enough in a local Docker setup.
+    operation_timeout asks the broker to wait until the topics are actually
+    gone (not just marked) before completing the future. A short sleep after
+    still helps cluster metadata propagate before an immediate recreate.
     """
     names = [d["name"] for d in definitions]
     print(f"Deleting topics: {names}")
 
-    try:
-        admin.delete_topics(names)
-        print("Delete request sent. Waiting 2s for broker to process...")
-        time.sleep(2)
-        print("Done.")
-    except UnknownTopicOrPartitionError:
-        print("Some topics didn't exist - nothing to delete.")
-    except KafkaError as exc:
-        print(f"Delete failed: {exc}", file=sys.stderr)
-        raise
+    futures = admin.delete_topics(names, operation_timeout=30)
+    for name, fut in futures.items():
+        try:
+            fut.result()
+            print(f"  deleted {name}")
+        except KafkaException as exc:
+            if exc.args[0].code() == KafkaError.UNKNOWN_TOPIC_OR_PART:
+                print(f"  {name} didn't exist - skipping.")
+            else:
+                print(f" Delete failed for {name}: {exc}", file=sys.stderr)
+                raise
+
+    print("Waiting 2s for broker metadata to settle...")
+    time.sleep(2)
+    print("Done.")
 
 
-def list_topics(admin: KafkaAdminClient) -> None:
+def list_topics(admin: AdminClient) -> None:
     """Print all topics currently in the cluster."""
-    topics = sorted(admin.list_topics())
+    topics = sorted(admin.list_topics(timeout=10).topics.keys())
     print(f"Cluster topics ({len(topics)}):")
     for t in topics:
         print(f"  {t}")
@@ -188,15 +214,13 @@ def main() -> None:
     definitions = load_topic_definitions(topics_file)
 
     admin = build_admin_client(cfg)
-    try:
-        if args.action == "sync":
-            sync_topics(admin, definitions)
-        elif args.action == "delete":
-            delete_topics(admin, definitions)
-        elif args.action == "list":
-            list_topics(admin)
-    finally:
-        admin.close()
+    # confluent-kafka's AdminClient has no close(); it's released on GC.
+    if args.action == "sync":
+        sync_topics(admin, definitions)
+    elif args.action == "delete":
+        delete_topics(admin, definitions)
+    elif args.action == "list":
+        list_topics(admin)
 
 
 if __name__ == "__main__":

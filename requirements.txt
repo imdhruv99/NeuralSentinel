@@ -1,4 +1,8 @@
-kafka-python==3.0.0
+# confluent-kafka wraps librdkafka (the C client real systems run on). It speaks
+# Kafka 3.9's flexible (KIP-482) protocol correctly, unlike pure-Python
+# kafka-python 3.0.0, whose consumer fetch path aborts with InvalidReceiveError
+# against this broker. Single client for producer, consumer, and topic admin.
+confluent-kafka==2.14.2
 pydantic==2.13.4
 pydantic-settings==2.14.1
 PyYAML==6.0.3
