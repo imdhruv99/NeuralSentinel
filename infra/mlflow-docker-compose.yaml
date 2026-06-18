@@ -12,7 +12,13 @@ services:
       MLFLOW_PORT: 5000
     command: >
       sh -c "pip install psycopg2-binary --quiet &&
-      mlflow server --serve-artifacts"
+      mlflow db upgrade postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENCODED}@postgres:5432/${MLFLOW_DB} &&
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts '*'
+      --cors-allowed-origins '*'
+      --serve-artifacts"
     volumes:
       - ./data/mlflow/artifacts:${MLFLOW_ARTIFACT_ROOT}
     networks:
