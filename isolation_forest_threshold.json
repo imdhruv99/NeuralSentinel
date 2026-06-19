@@ -1,0 +1,10 @@
+{
+  "threshold_score_samples": -0.3902949687310358,
+  "feature_columns": [
+    "value__max",
+    "value__min",
+    "value__std",
+    "value__mean",
+    "value__rate"
+  ]
+}
