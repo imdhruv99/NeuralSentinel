@@ -3,7 +3,7 @@ import psycopg
 
 import pandas as pd
 
-from ml.training.forest_config import TrainingConfig
+from ml.training.isolation_forest_config import TrainingConfig
 
 
 def _flatten_feature_map(feature_map: dict[str, dict[str, float]]) -> dict[str, float]:

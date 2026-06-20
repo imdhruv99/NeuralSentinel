@@ -1,4 +1,4 @@
-from ml.training.forest_config import TrainingConfig, seed_everything
+from ml.training.isolation_forest_config import TrainingConfig, seed_everything
 from ml.training.isolation_forest_data import load_training_frame
 from ml.training.isolation_forest_train import log_to_mlflow, train_isolation_forest
 

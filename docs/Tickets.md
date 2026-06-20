@@ -48,7 +48,7 @@
 - **Config:** `WINDOW_SIZE_S`, `SLIDE_S`, `CONSUMER_GROUP`.
 - **DoD:** Features queryable in Postgres; latency < 1s p95 from event to feature.
 
-### RTAD-005 — Isolation Forest baseline model + training job
+### RTAD-005 — Isolation Forest baseline model + training job - COMPLETED
 
 - **Type:** Story · **Epic:** C Modeling · **Priority:** High · **Points:** 5
 - **Description:** Train an Isolation Forest on historical windowed features as the first detector and log it to MLflow.

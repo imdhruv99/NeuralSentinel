@@ -1,16 +1,16 @@
 import json
 import time
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from pathlib import Path
 
 from dataclasses import dataclass
 
+from sklearn.pipeline import Pipeline
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     average_precision_score,
     f1_score,
@@ -25,7 +25,7 @@ from mlflow.models import infer_signature
 from mlflow.exceptions import MlflowException
 
 
-from ml.training.forest_config import TrainingConfig
+from ml.training.isolation_forest_config import TrainingConfig
 
 
 @dataclass
