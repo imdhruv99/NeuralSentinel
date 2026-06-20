@@ -50,6 +50,10 @@ help:
 	@echo "    produce-nab   Replay the NAB dataset into events.raw"
 	@echo "    produce-smd   Replay the SMD dataset into events.raw"
 	@echo "    consume       Run the feature-windowing consumer (Ctrl-C to drain)"
+	@echo ""
+	@echo "  ML Training"
+	@echo "    train-iforest Train the Isolation Forest model"
+	@echo ""
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -224,3 +228,11 @@ migrate:
 	echo "Applying $(SCHEMA_FILE) to $$PGDB as $$PGUSER ..."; \
 	$(COMPOSE) exec -T -e PGPASSWORD="$$PGPW" postgres \
 		psql -v ON_ERROR_STOP=1 -U "$$PGUSER" -d "$$PGDB" < $(SCHEMA_FILE)
+
+
+# -----------------------------------------------------------------------------
+# ML Training
+# -----------------------------------------------------------------------------
+.PHONY: train-iforest
+train-iforest:
+    venv/bin/python -m ml.training.main
