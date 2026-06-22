@@ -364,3 +364,107 @@ FROM features ORDER BY window_end DESC LIMIT 5;
 
 The latest window per entity is also cached in Redis under
 `features:latest:<entity_id>` as a JSON blob.
+
+---
+
+## ML Training
+
+Both detectors train on windowed features persisted by the consumer.
+The stack must be up and features must be loaded before running either job.
+
+### Isolation Forest (`anomaly-iforest`)
+
+An `IsolationForest` from scikit-learn is the first-stage detector, optimised
+for the NAB UNIVARIATE path. Isolation Forest works by randomly partitioning
+the feature space into binary trees; points that are isolated quickly
+(short average path length) are anomalous — no notion of "normal" cluster
+shape is assumed.
+
+**Architecture choices:**
+
+- Trained on **known-normal rows only** (`label == false`). Anomaly rows are
+  excluded from the fit so the model learns only the normal distribution and
+  flags deviations from it.
+- **Warm-start incremental fitting** (20 checkpoints up to `N_ESTIMATORS=300
+  trees`) with per-step progress logs — the forest grows incrementally so you
+  can see training progress rather than one blocking call.
+- **Time-ordered train/val split** (80/20). Validation rows come from later
+  in time so the model is never evaluated on data from its own training window.
+- **Threshold from the validation quantile:** `np.quantile(val_scores, CONTAMINATION)`
+  on `score_samples` output. Lower score = more anomalous; the threshold is the
+  bottom `CONTAMINATION` percentile of validation scores.
+
+**Validation results (NAB · 143,284 windows · 5 features):**
+
+| Metric | Value |
+|---|---|
+| `valid_roc_auc` | 0.909 |
+| `valid_pr_auc` | 0.011 |
+| `valid_recall` | 0.381 |
+| `threshold (score_samples @ q=0.05)` | −0.390295 |
+
+> PR-AUC is low (~0.011) because the NAB anomaly rate is ~0.5% precision is
+
+> extremely sensitive to the threshold at this imbalance. ROC-AUC of 0.909
+> shows the model has strong ranking ability regardless.
+
+```bash
+make train-iforest
+```
+
+Results are visible in the MLflow UI at http://localhost:58083 under the `neural-sentinel-isolation-forest` experiment. Registered model: `anomaly-iforest`.
+
+### LSTM Autoencoder (anomaly-lstmae)
+
+An LSTM-based sequence autoencoder is the second-stage detector, trained on the SMD MULTIVARIATE path (28 machines × 38 metrics). Where the Isolation Forest scores individual feature vectors, the LSTM-AE scores sequences, it learns to reconstruct normal temporal patterns and flags windows where reconstruction error is high.
+
+**Architecture:**
+
+```
+Input (batch, T=30, F=190)
+    │
+    ▼
+Encoder LSTM  (n_layers=2, hidden_dim=64)
+    │  bottleneck: final hidden + cell state (h_n, c_n)
+    ▼
+context = h_n[-1] repeated T times  →  (batch, 30, 64)
+    │
+    ▼
+Decoder LSTM  (n_layers=2, hidden_dim=64)
+    │
+    ▼
+Linear projection  →  (batch, 30, 190)  ← reconstruction
+    │
+    ▼
+Anomaly score = mean((input − reconstruction)²) per sequence
+```
+
+The decoder receives the same bottleneck vector at every timestep as input - not its own previous output. This prevents the decoder from copying the input step-by-step and forces it to reconstruct purely from the compressed latent representation. A sequence the model has never seen (anomalous) cannot be compressed well, so reconstruction error is high.
+
+**Training choices:**
+
+- Sequences are built per entity with the train/val split applied before windowing - sequences never cross machine boundaries, and no future timestep leaks into training sequences.
+
+- Trained on normal sequences only (same philosophy as IForest).
+
+- Early stopping (`patience=5`) with best-checkpoint restore the weights with lowest validation loss are kept, not the final epoch's weights.
+
+- Threshold: `np.quantile(val_errors, 1 − CONTAMINATION)` the top
+`CONTAMINATION` fraction of validation reconstruction errors. Note the direction is opposite to IForest: high error = anomalous.
+
+- Model exported as TorchScript (`torch.jit.trace`) before registration. The scoring consumer can `torch.jit.load()` it without importing the model class definition.
+
+**Validation results (SMD · 36,976 train sequences · 8,644 val sequences · 190 features)**:
+
+| Metric | Value |
+|---|---|
+| `val_best_loss`(MSE) | 0.6716 |
+| `threshold (recon_error @ q=0.95)` | 2.755 |
+| `val_predicted_anomaly_rate` | 0.050 |
+| Epochs trained | 28 / 50 (early stop) |
+
+```
+make train-lstm-ae
+```
+
+Results are visible in the MLflow UI at http://localhost:58083 under the `neural-sentinel-lstm-ae` experiment. Registered model: `anomaly-lstmae`.

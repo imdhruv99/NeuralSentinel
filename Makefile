@@ -52,7 +52,8 @@ help:
 	@echo "    consume       Run the feature-windowing consumer (Ctrl-C to drain)"
 	@echo ""
 	@echo "  ML Training"
-	@echo "    train-iforest Train the Isolation Forest model"
+	@echo "  train-iforest   Train an isolation forest on NAB features and log to MLflow"
+	@echo "  train-lstm-ae   Train an LSTM-AE on SMD sequences and log to MLflow"
 	@echo ""
 
 # -----------------------------------------------------------------------------
@@ -233,6 +234,11 @@ migrate:
 # -----------------------------------------------------------------------------
 # ML Training
 # -----------------------------------------------------------------------------
+
 .PHONY: train-iforest
 train-iforest:
-    venv/bin/python -m ml.training.main
+	venv/bin/python -m ml.training.main iforest
+
+.PHONY: train-lstm-ae
+train-lstm-ae:
+	venv/bin/python -m ml.training.main lstm-ae
