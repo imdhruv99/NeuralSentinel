@@ -16,16 +16,16 @@ def _flatten_feature_map(feature_map: dict) -> dict[str, float]:
         - feature_map: A dict where keys are metric names and values are dicts of statistic names to values.
 
     Returns:
-        - A flat dict where keys are "<metric_name>_<stat_name>" and values are the corresponding float values.
+        - A flat dict where keys are "<metric_name>__<stat_name>" and values are the corresponding float values.
     """
     row: dict[str, float] = {}
     for metric_name, stats_map in feature_map.items():
         for stat_name, value in stats_map.items():
-            row[f"{metric_name}_{stat_name}"] = value
+            row[f"{metric_name}__{stat_name}"] = value
     return row
 
 
-def load_squence_frame(cfg: LSTMAEConfig) -> pd.DataFrame:
+def load_sequence_frame(cfg: LSTMAEConfig) -> pd.DataFrame:
     """
     Load the preprocessed features from Postgres into a flat DataFrame for LSTM-AE training.
     The features are stored in a JSONB column as a nested dict of metric to stats, so we flatten them into
@@ -84,7 +84,8 @@ def make_train_val_sequences(
 
     for _, group in frame.groupby("entity_id", sort=False):
         x = group[feature_cols].to_numpy(dtype=np.float32)
-        y = group["label"].fillna(False).to_numpy(dtype=np.bool)
+        y = group["label"].map(lambda v: bool(
+            v) if v is not None else False).to_numpy(dtype=bool)
         n = len(x)
 
         if n < seq_len + 1:

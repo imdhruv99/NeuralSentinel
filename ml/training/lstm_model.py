@@ -32,7 +32,7 @@ class LSTMAutoEncoder(nn.Module):
         # Decoder reconstructs the sequence from the final hidden state of the encoder, repeated across the sequence length.
         self.decoder = nn.LSTM(
             input_size=hidden_dim,
-            hidden_size=n_features,
+            hidden_size=hidden_dim,
             num_layers=n_layers,
             dropout=dropout if n_layers > 1 else 0.0,
             batch_first=True,

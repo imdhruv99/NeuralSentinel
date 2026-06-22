@@ -58,7 +58,7 @@
 - **Config:** `CONTAMINATION`, `N_ESTIMATORS`, `MLFLOW_EXPERIMENT`.
 - **DoD:** Model registered in MLflow registry as `anomaly-iforest`; eval metrics recorded.
 
-### RTAD-006 — LSTM Autoencoder detector (PyTorch)
+### RTAD-006 — LSTM Autoencoder detector (PyTorch) - COMPLETED
 
 - **Type:** Story · **Epic:** C · **Priority:** High · **Points:** 8
 - **Description:** Implement a sequence LSTM-AE that flags anomalies by reconstruction error, complementing the tree-based detector for temporal patterns.
