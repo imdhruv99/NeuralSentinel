@@ -1,11 +1,15 @@
+from services.producer.kafka_producer import build_producer, publish, flush_and_close
+from services.common.contracts import EventEnvelope, Dataset, StreamType
 import csv
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from config.logging import setup_logging
 from services.producer.config import ProducerConfig
-from services.common.contracts import EventEnvelope, Dataset, StreamType
-from services.producer.kafka_producer import build_producer, publish, flush_and_close
+
+logger = logging.getLogger(__name__)
 
 # SMD rows are 38-dimensional vectors of sensor readings.
 # Name the metrics positionally because the dataset ships without headers.
@@ -123,6 +127,7 @@ def replay_machine(
 
 
 def main() -> None:
+    setup_logging()
     cfg = ProducerConfig()
     data_subdir, labels_subdir = split_dirs(cfg)
     machines = discover_machines(data_subdir, cfg.smd_machine_filter)
@@ -135,11 +140,13 @@ def main() -> None:
         )
 
     split = "test" if cfg.smd_use_test_split else "train"
-    print(f"Replaying {len(machines)} machine(s) from SMD {split} split to {cfg.topic_events_raw} at {cfg.smd_replay_speed}x"
-          f" speed")
+    logger.info(
+        "replaying %d machine(s) from SMD %s split to %s at %.1fx speed",
+        len(machines), split, cfg.topic_events_raw, cfg.smd_replay_speed,
+    )
 
-    producer = build_producer(cfg)
     total = 0
+    producer = build_producer(cfg)
     try:
         for txt_path in machines:
             labels = None
@@ -147,12 +154,13 @@ def main() -> None:
                 labels = load_labels(labels_subdir / txt_path.name)
 
             n = replay_machine(producer, cfg, txt_path, labels)
-            print(f"Replayed {n} events from {txt_path.name}")
+            logger.info("replayed %d events from %s", n, txt_path.name)
             total += n
     finally:
         flush_and_close(producer)
 
-    print(f"Done. Published {total} SMD events to {cfg.topic_events_raw}.")
+    logger.info("done; published %d SMD events to %s",
+                total, cfg.topic_events_raw)
 
 
 if __name__ == "__main__":

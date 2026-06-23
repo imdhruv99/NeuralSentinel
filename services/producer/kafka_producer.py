@@ -13,7 +13,7 @@ arrive on a background thread and are surfaced through _on_delivery.
 
 import logging
 
-from confluent_kafka import Producer
+from confluent_kafka import KafkaError, Message, Producer
 
 from services.producer.config import ProducerConfig
 from services.common.contracts import EventEnvelope
@@ -21,7 +21,7 @@ from services.common.contracts import EventEnvelope
 logger = logging.getLogger(__name__)
 
 
-def _on_delivery(err, msg) -> None:
+def _on_delivery(err: KafkaError | None, msg: Message) -> None:
     """Per-message delivery report (called from poll()/flush()).
 
     Success is silent; a failure here means the record never reached the broker

@@ -60,15 +60,21 @@ class FeatureSink:
         # An explicit commit at the end of the batch delivers exactly that,
         # and any failure before it rolls back cleanly so the un-committed
         # Kafka offsets replay the same rows.
-        self._pg = psycopg.connect(self._cfg.pg_dsn, autocommit=False)
-        self._redis = redis.Redis(
-            host=self._cfg.redis_host,
-            port=self._cfg.redis_port,
-            db=self._cfg.redis_db,
-            password=self._cfg.redis_password,
-            socket_timeout=2,  # cache must never hang the hot path
-            decode_responses=False,
-        )
+        pg = psycopg.connect(self._cfg.pg_dsn, autocommit=False)
+        try:
+            r = redis.Redis(
+                host=self._cfg.redis_host,
+                port=self._cfg.redis_port,
+                db=self._cfg.redis_db,
+                password=self._cfg.redis_password,
+                socket_timeout=2,  # cache must never hang the hot path
+                decode_responses=False,
+            )
+        except Exception:
+            pg.close()
+            raise
+        self._pg = pg
+        self._redis = r
 
     def close(self) -> None:
         if self._pg is not None:

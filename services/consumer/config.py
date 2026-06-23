@@ -1,39 +1,16 @@
-"""
-Configuration for the feature-windowing consumer.
-
-Reads the root .env via pydantic-settings (same priority order as the producer:
-env vars > .env > defaults). Connections target the host-mapped ports because
-the consumer runs on the host, same as the producers.
-"""
-
-from pathlib import Path
-
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
+
+from config.settings import _MODEL_CONFIG, _KafkaSettings, _PostgresSettings, _RedisSettings
 
 
-class ConsumerConfig(BaseSettings):
+class ConsumerConfig(_PostgresSettings, _KafkaSettings, _RedisSettings, BaseSettings):
     """
     Configuration for the feature-windowing consumer.
     """
 
-    model_config = SettingsConfigDict(
-        env_file=Path(__file__).parent.parent.parent / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    model_config = _MODEL_CONFIG
 
-    # Kafka configuration
-    kafka_bootstrap_servers: str = Field(
-        default="localhost:19091,localhost:19092",
-        alias="KAFKA_BOOTSTRAP_SERVERS",
-        description="Comma-separated list of Kafka bootstrap servers in host:port format.",
-    )
-    topic_events_raw: str = Field(
-        default="events.raw",
-        alias="EVENTS_TOPIC",
-        description="Kafka topic for raw events from producers.",
-    )
     consumer_group: str = Field(
         default="neural-sentinel-feature-windowing-consumer",
         alias="CONSUMER_GROUP",
@@ -73,55 +50,6 @@ class ConsumerConfig(BaseSettings):
                      "a smaller value means more frequent scoring with overlapping windows."),
     )
 
-    # PostgreSQL configuration
-    pg_host: str = Field(
-        default="localhost",
-        alias="PG_HOST",
-        description="PostgreSQL host for alert persistence.",
-    )
-    pg_port: int = Field(
-        default=5432,
-        alias="PG_PORT",
-        description="PostgreSQL port for alert persistence.",
-    )
-    pg_db: str = Field(
-        default="neural_sentinel",
-        alias="POSTGRES_DB",
-        description="PostgreSQL database name for alert persistence.",
-    )
-    pg_user: str = Field(
-        default="nsapp",
-        alias="PG_APP_USER",
-        description="PostgreSQL username for alert persistence.",
-    )
-    pg_password: str = Field(
-        default="admin@123",
-        alias="NSAPP_PASSWORD",
-        description="PostgreSQL password for alert persistence.",
-    )
-
-    # Redis
-    redis_host: str = Field(
-        default="localhost",
-        alias="REDIS_HOST",
-        description="Redis host for caching and state management.",
-    )
-    redis_port: int = Field(
-        default=6379,
-        alias="REDIS_PORT",
-        description="Redis port for caching and state management.",
-    )
-    redis_password: str = Field(
-        default="admin@123",
-        alias="REDIS_PASSWORD",
-        description="Redis password for caching and state management.",
-    )
-    redis_db: int = Field(
-        default=0,
-        alias="REDIS_DB",
-        description="Redis database index for caching and state management.",
-    )
-
     # Batching/Loop Tuning
     # Persist + Commit once per batch. This is also the backpressure knob for the consumer:
     # if the producer is faster than the consumer, the consumer will
@@ -143,16 +71,3 @@ class ConsumerConfig(BaseSettings):
         alias="CONSUMER_POLL_TIMEOUT_MS",
         description="Timeout in milliseconds for Kafka consumer polling.",
     )
-
-    @property
-    def pg_dsn(self) -> str:
-        """
-        libpq connection string for PostgreSQL, built from individual config fields.
-        """
-        return (
-            f"host={self.pg_host} "
-            f"port={self.pg_port} "
-            f"dbname={self.pg_db} "
-            f"user={self.pg_user} "
-            f"password={self.pg_password}"
-        )

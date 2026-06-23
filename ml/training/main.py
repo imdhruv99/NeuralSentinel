@@ -1,15 +1,20 @@
 import argparse
+import logging
 
-from ml.training.isolation_forest_config import TrainingConfig, seed_everything
+from config.logging import setup_logging
+from config.settings import _seed_everything as seed_everything
+from ml.training.isolation_forest_config import TrainingConfig
 from ml.training.isolation_forest_data import load_training_frame
 from ml.training.isolation_forest_train import log_to_mlflow, train_isolation_forest
 
-from ml.training.lstm_config import LSTMAEConfig, seed_everything
+from ml.training.lstm_config import LSTMAEConfig
 from ml.training.lstm_data import load_sequence_frame
 from ml.training.lstm_train import (
     log_to_mlflow as lstm_log,
     train_lstm_ae,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_isolation_forest() -> int:
@@ -29,12 +34,12 @@ def run_isolation_forest() -> int:
     artifacts = train_isolation_forest(cfg, frame)
     run_id = log_to_mlflow(cfg, artifacts)
 
-    print(f"\nTraining complete. Run ID: {run_id}")
-    print("Registered model: anomaly-iforest")
-    print(
-        f"Threshold (score_samples, lower = more anomalous): {artifacts.threshold:.6f}")
+    logger.info("training complete — run_id=%s", run_id)
+    logger.info("registered model: anomaly-iforest")
+    logger.info(
+        "threshold (score_samples, lower = more anomalous): %.6f", artifacts.threshold)
     for key, value in artifacts.metrics.items():
-        print(f"  {key}: {value:.6f}")
+        logger.info("  %s: %.6f", key, value)
     return 0
 
 
@@ -55,21 +60,17 @@ def run_lstm_ae() -> int:
     artifacts = train_lstm_ae(cfg, frame)
     run_id = lstm_log(cfg, artifacts)
 
-    print(f"\nTraining complete. Run ID: {run_id}")
-    print("Registered model: anomaly-lstmae")
-    print(
-        f"Threshold (recon error, higher = more anomalous): {artifacts.threshold:.6f}")
+    logger.info("training complete — run_id=%s", run_id)
+    logger.info("registered model: anomaly-lstmae")
+    logger.info(
+        "threshold (recon error, higher = more anomalous): %.6f", artifacts.threshold)
     for key, value in artifacts.metrics.items():
-        print(f"  {key}: {value:.4f}")
+        logger.info("  %s: %.4f", key, value)
     return 0
 
 
 def main() -> int:
-    """
-    Main entrypoint for training models.
-    Usage: `python -m ml.training.main <model>`
-    where <model> is either "iforest" or "lstm-ae".
-    """
+    setup_logging()
     parser = argparse.ArgumentParser(
         prog="python -m ml.training.main",
         description="NeuralSentinel model training entrypoint.",

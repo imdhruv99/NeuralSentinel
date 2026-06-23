@@ -3,19 +3,8 @@ import psycopg
 
 import pandas as pd
 
+from ml.training.features import flatten_feature_map
 from ml.training.isolation_forest_config import TrainingConfig
-
-
-def _flatten_feature_map(feature_map: dict[str, dict[str, float]]) -> dict[str, float]:
-    """
-    Flatten a nested feature map into a single dict of metric_name -> value.
-    """
-    row: dict[str, float] = {}
-    for metric_name, stats_map in feature_map.items():
-        for stat_name, value in stats_map.items():
-            key = f"{metric_name}__{stat_name}"
-            row[key] = value
-    return row
 
 
 def load_training_frame(cfg: TrainingConfig) -> pd.DataFrame:
@@ -58,7 +47,7 @@ def load_training_frame(cfg: TrainingConfig) -> pd.DataFrame:
         if isinstance(f_map, str):
             # Convert JSON string to dict if necessary
             f_map = json.loads(f_map)
-        flat = _flatten_feature_map(f_map)
+        flat = flatten_feature_map(f_map)
         flat["entity_id"] = r["entity_id"]
         flat["window_end"] = pd.to_datetime(r["window_end"], utc=True)
         flat["label"] = r["label"]
