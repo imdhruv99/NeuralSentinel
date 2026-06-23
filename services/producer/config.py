@@ -1,55 +1,18 @@
 from pathlib import Path
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
+
+from config.settings import _MODEL_CONFIG, _KafkaSettings
 
 
-class ProducerConfig(BaseSettings):
+class ProducerConfig(_KafkaSettings, BaseSettings):
     """
-    Configuration for all producer related settings.
-
-    Pydantic-settings reads value in this priority order:
-    1. Environment variables - Highest priority
-    2. .env file - from env_file path below
-    3. Field defaults - lowest priority
-
-    Naming Convention: env vars use SCREAMING_SNAKE_CASE, Python attributes
-    use snake_case. Pydantic-settings handles the mapping automatically.
+    Producer configuration. Kafka connection + topic fields come from _KafkaSettings.
+    Only producer-specific fields are defined here.
     """
 
-    model_config = SettingsConfigDict(
-        # this let us run file from any working directory.
-        env_file=Path(__file__).parent.parent.parent / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore"  # Don't fail on unrecognized fields env vars
-    )
-
-    # Kafka Connection Settings
-
-    kafka_bootstrap_servers: str = Field(
-        default="localhost:19091,localhost:19092",
-        alias="KAFKA_BOOTSTRAP_SERVERS",
-        description=(
-            "Comma-separated list of kafka host:port pairs."
-            "From outside Docker use the EXTERNAL listener ports (19091, 19092)."
-            "From inside Docker use the INTERNAL listener ports (kafka-broker-1:9092, kafka-broker-2:9093)."
-        )
-    )
-
-    # Topic Settings
-    # Topic names must match with topics.yaml
-    topic_events_raw: str = Field(
-        default="events.raw",
-        alias="EVENTS_TOPIC",
-    )
-    topic_events_scored: str = Field(
-        default="events.scored",
-        alias="SCORED_TOPIC",
-    )
-    topic_alerts: str = Field(
-        default="alerts",
-        alias="ALERTS_TOPIC",
-    )
+    model_config = _MODEL_CONFIG
 
     # NAB producer settings
     nab_data_dir: Path = Field(

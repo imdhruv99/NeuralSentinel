@@ -7,14 +7,18 @@ anomalous per stream. Let us walk every CSV row-by-row, wrap it in an EventEnvel
 keyed by entity_id, and publish at a configurable replay speed.
 """
 
+from services.producer.kafka_producer import build_producer, publish, flush_and_close
+from services.common.contracts import EventEnvelope, Dataset, StreamType
 import csv
 import json
+import logging
 import time
 from pathlib import Path
 
+from config.logging import setup_logging
 from services.producer.config import ProducerConfig
-from services.common.contracts import EventEnvelope, Dataset, StreamType
-from services.producer.kafka_producer import build_producer, publish, flush_and_close
+
+logger = logging.getLogger(__name__)
 
 
 def load_labels(labels_file: Path) -> dict[str, set[str]]:
@@ -101,7 +105,7 @@ def replay_stream(
 
 
 def main() -> None:
-
+    setup_logging()
     cfg = ProducerConfig()
     labels = load_labels(cfg.nab_labels_file)
     streams = discover_streams(cfg.nab_data_dir, cfg.nab_stream_filter)
@@ -113,8 +117,10 @@ def main() -> None:
             "Please run `make fetch-data` to download the NAB dataset before replaying."
         )
 
-    print(
-        f"Replaying {len(streams)} NAB streams to {cfg.topic_events_raw} at {cfg.nab_replay_speed}x speed")
+    logger.info(
+        "replaying %d NAB stream(s) to %s at %.1fx speed",
+        len(streams), cfg.topic_events_raw, cfg.nab_replay_speed,
+    )
 
     producer = build_producer(cfg)
     total = 0
@@ -124,12 +130,13 @@ def main() -> None:
             stream_key = relative_stream_key(cfg.nab_data_dir, csv_path)
             n = replay_stream(producer, cfg, csv_path,
                               labels.get(stream_key, set()))
-            print(f"{stream_key}: published {n} events")
+            logger.info("%s: published %d events", stream_key, n)
             total += n
     finally:
         flush_and_close(producer)
 
-    print(f"Done. Published {total} NAB events to {cfg.topic_events_raw}.")
+    logger.info("done; published %d NAB events to %s",
+                total, cfg.topic_events_raw)
 
 
 if __name__ == "__main__":

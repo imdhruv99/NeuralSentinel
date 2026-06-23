@@ -16,16 +16,13 @@ import signal
 
 from confluent_kafka import Consumer
 
+from config.logging import setup_logging
 from services.common.contracts import EventEnvelope
 from services.consumer.config import ConsumerConfig
 from services.consumer.windowing import FeatureRow, WindowManager
 from services.consumer.sinks import FeatureSink
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
-logger = logging.getLogger("consumer")
+logger = logging.getLogger(__name__)
 
 
 class _Shutdown:
@@ -134,6 +131,7 @@ def run(cfg: ConsumerConfig) -> None:
 
 
 def main() -> int:
+    setup_logging()
     run(ConsumerConfig())
     return 0
 

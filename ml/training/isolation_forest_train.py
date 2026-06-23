@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 
 import numpy as np
@@ -26,6 +27,8 @@ from mlflow.exceptions import MlflowException
 
 
 from ml.training.isolation_forest_config import TrainingConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -78,10 +81,9 @@ def _fit_iforest_with_progress(
 
         pct = (n_trees / total_trees) * 100.0
         elapsed = time.time() - t0
-        print(
-            f"[IFOREST] step={idx}/{len(checkpoints)} "
-            f"trees={n_trees}/{total_trees} "
-            f"progress={pct:6.2f}% elapsed={elapsed:7.2f}s"
+        logger.info(
+            "step=%d/%d trees=%d/%d progress=%6.2f%% elapsed=%7.2fs",
+            idx, len(checkpoints), n_trees, total_trees, pct, elapsed,
         )
 
     return model
@@ -137,10 +139,10 @@ def train_isolation_forest(
     if len(x_train_fit) == 0:
         raise ValueError("Training split is empty after normal-row filtering.")
 
-    print(
-        f"[TRAIN] rows_total={len(frame)} rows_train={len(x_train)} "
-        f"rows_valid={len(x_val)} rows_train_fit={len(x_train_fit)} "
-        f"features={len(feature_columns)}"
+    logger.info(
+        "rows_total=%d rows_train=%d rows_valid=%d rows_train_fit=%d features=%d",
+        len(frame), len(x_train), len(x_val), len(
+            x_train_fit), len(feature_columns),
     )
 
     # Fit scaler once, then train IF with warm_start progress logging
@@ -154,8 +156,8 @@ def train_isolation_forest(
     valid_scores = iforest.score_samples(x_val_scaled)
 
     threshold = float(np.quantile(valid_scores, cfg.contamination))
-    print(
-        f"[TRAIN] threshold(score_samples @ q={cfg.contamination})={threshold:.6f}"
+    logger.info(
+        "threshold(score_samples @ q=%s)=%.6f", cfg.contamination, threshold
     )
 
     valid_pred_anomaly = valid_scores <= threshold
@@ -270,14 +272,12 @@ def log_to_mlflow(cfg: TrainingConfig, artifacts: TrainArtifacts) -> str:
                 input_example=input_example,
                 registered_model_name=model_name,
             )
-            print(f"[MLFLOW] model registered: {model_name}")
+            logger.info("model registered: %s", model_name)
 
         except MlflowException as exc:
-            print(
-                f"[MLFLOW] registration/model logging skipped due to server-client mismatch: {exc}")
-
-            # Keep run successful and still persist useful artifacts.
-            # This path is compatibility-safe for older tracking servers.
+            logger.warning(
+                "registration/model logging skipped due to server-client mismatch: %s", exc
+            )
             mlflow.log_dict(
                 {
                     "threshold_score_samples": artifacts.threshold,
@@ -287,8 +287,8 @@ def log_to_mlflow(cfg: TrainingConfig, artifacts: TrainArtifacts) -> str:
                 },
                 "calibration/isolation_forest_threshold.json",
             )
-            print(
-                "[MLFLOW] logged calibration fallback artifact; run marked successful.")
+            logger.info(
+                "logged calibration fallback artifact; run marked successful")
 
         run_id = run.info.run_id
         return run_id

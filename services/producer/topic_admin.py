@@ -1,4 +1,5 @@
 import sys
+import logging
 import time
 import yaml
 import argparse
@@ -14,7 +15,10 @@ from confluent_kafka.admin import (
     AlterConfigOpType,
 )
 
+from config.logging import setup_logging
 from services.producer.config import ProducerConfig
+
+logger = logging.getLogger(__name__)
 
 
 def load_topic_definitions(path: Path) -> list[dict]:
@@ -79,7 +83,7 @@ def sync_topics(admin: AdminClient, definitions: list[dict]) -> None:
     # list_topics() returns cluster metadata (includes internal topics like
     # __consumer_offsets); we only diff against our own declared names.
     existing_topics = set(admin.list_topics(timeout=10).topics.keys())
-    print(f"Cluster currently has {len(existing_topics)} topic(s).")
+    logger.info("cluster has %d topic(s)", len(existing_topics))
 
     to_create = []
     to_update = []
@@ -102,32 +106,29 @@ def sync_topics(admin: AdminClient, definitions: list[dict]) -> None:
 
     # Create new topics
     if to_create:
-        print(f"\n Creating {len(to_create)} new topic(s):")
+        logger.info("creating %d new topic(s):", len(to_create))
         for t in to_create:
-            print(
-                f"  + {t.topic}  (partitions={t.num_partitions}, rf={t.replication_factor})")
+            logger.info(
+                "  + %s  (partitions=%d, rf=%d)",
+                t.topic, t.num_partitions, t.replication_factor,
+            )
         futures = admin.create_topics(to_create)
         for name, fut in futures.items():
             try:
-                fut.result()  # blocks until the controller acks this topic
-                print(f"  created {name}")
+                fut.result()
+                logger.info("created %s", name)
             except KafkaException as exc:
-                # Race condition: another process created it between our list and
-                # create. Safe to ignore — the topic exists, which is the goal.
                 if exc.args[0].code() == KafkaError.TOPIC_ALREADY_EXISTS:
-                    print(f"  {name} already existed (race) - continuing.")
+                    logger.info("%s already existed (race) — continuing", name)
                 else:
-                    print(f" Create failed for {name}: {exc}", file=sys.stderr)
+                    logger.error("create failed for %s: %s", name, exc)
                     raise
     else:
-        print("\nNo new topics to create.")
+        logger.info("no new topics to create")
 
     # Update configs for existing topics
     if to_update:
-        print(f"\n Updating config on {len(to_update)} existing topic(s):")
-        # incremental_alter_configs only touches the keys we name (SET each one)
-        # and leaves every other broker-managed config untouched — unlike the
-        # deprecated alter_configs, which replaced the whole config map.
+        logger.info("updating config on %d existing topic(s):", len(to_update))
         resources = [
             ConfigResource(
                 ConfigResource.Type.TOPIC,
@@ -144,13 +145,12 @@ def sync_topics(admin: AdminClient, definitions: list[dict]) -> None:
         for res, fut in futures.items():
             try:
                 fut.result()
-                print(f"  ~ {res.name} config updated.")
+                logger.info("  ~ %s config updated", res.name)
             except KafkaException as exc:
-                print(f" Config update failed for {res.name}: {exc}",
-                      file=sys.stderr)
+                logger.error("config update failed for %s: %s", res.name, exc)
                 raise
     else:
-        print("No existing topics to update.")
+        logger.info("no existing topics to update")
 
 
 def delete_topics(admin: AdminClient, definitions: list[dict]) -> None:
@@ -166,31 +166,31 @@ def delete_topics(admin: AdminClient, definitions: list[dict]) -> None:
     still helps cluster metadata propagate before an immediate recreate.
     """
     names = [d["name"] for d in definitions]
-    print(f"Deleting topics: {names}")
+    logger.info("deleting topics: %s", names)
 
     futures = admin.delete_topics(names, operation_timeout=30)
     for name, fut in futures.items():
         try:
             fut.result()
-            print(f"  deleted {name}")
+            logger.info("deleted %s", name)
         except KafkaException as exc:
             if exc.args[0].code() == KafkaError.UNKNOWN_TOPIC_OR_PART:
-                print(f"  {name} didn't exist - skipping.")
+                logger.info("%s did not exist — skipping", name)
             else:
-                print(f" Delete failed for {name}: {exc}", file=sys.stderr)
+                logger.error("delete failed for %s: %s", name, exc)
                 raise
 
-    print("Waiting 2s for broker metadata to settle...")
+    logger.info("waiting 2s for broker metadata to settle...")
     time.sleep(2)
-    print("Done.")
+    logger.info("done")
 
 
 def list_topics(admin: AdminClient) -> None:
     """Print all topics currently in the cluster."""
     topics = sorted(admin.list_topics(timeout=10).topics.keys())
-    print(f"Cluster topics ({len(topics)}):")
+    logger.info("cluster topics (%d):", len(topics))
     for t in topics:
-        print(f"  {t}")
+        logger.info("  %s", t)
 
 
 def main() -> None:
@@ -210,6 +210,7 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = ProducerConfig()
+    setup_logging()
     topics_file = Path(__file__).parent / "topics.yaml"
     definitions = load_topic_definitions(topics_file)
 

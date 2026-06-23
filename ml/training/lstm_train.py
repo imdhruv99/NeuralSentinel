@@ -1,6 +1,6 @@
+import logging
 import time
 from dataclasses import dataclass
-
 
 import mlflow
 import numpy as np
@@ -21,6 +21,8 @@ from sklearn.metrics import (
 from ml.training.lstm_config import LSTMAEConfig
 from ml.training.lstm_data import make_train_val_sequences
 from ml.training.lstm_model import LSTMAutoEncoder
+
+logger = logging.getLogger(__name__)
 
 
 def _pick_device() -> torch.device:
@@ -109,7 +111,7 @@ def train_lstm_ae(
         - LSTMArtifacts containing the trained model, scaler, threshold, feature columns, and metrics
     """
     device = _pick_device()
-    print(f"(LSTM-AE) device={device}")
+    logger.info("device=%s", device)
 
     feature_cols = [c for c in frame.columns if "__" in c]
     if not feature_cols:
@@ -119,9 +121,9 @@ def train_lstm_ae(
     x_train, x_val, y_train, y_val = make_train_val_sequences(
         frame, feature_cols, cfg.seq_len, cfg.validation_ratio
     )
-    print(
-        f"[LSTM-AE] sequences train={len(x_train)} val={len(x_val)} "
-        f"features={len(feature_cols)} seq_len={cfg.seq_len}"
+    logger.info(
+        "sequences train=%d val=%d features=%d seq_len=%d",
+        len(x_train), len(x_val), len(feature_cols), cfg.seq_len,
     )
 
     # Fit the scaler on the training data only.
@@ -144,8 +146,8 @@ def train_lstm_ae(
     # Fit only on normal sequences (label=False) to prevent data leakage of anomalies into the scaler.
     normal_mask = ~y_train
     x_train_normal = x_train_scaled[normal_mask]
-    print(
-        f"[LSTM-AE] normal training sequences: {len(x_train_normal)}/{len(x_train)}"
+    logger.info(
+        "normal training sequences: %d/%d", len(x_train_normal), len(x_train)
     )
 
     if len(x_train_normal) < cfg.batch_size:
@@ -185,10 +187,9 @@ def train_lstm_ae(
         val_loss: float = _run_epoch(model, val_loader, None, device)
         elapsed: float = time.time() - t0
 
-        print(
-            f"[LSTM-AE] epoch={epoch:3d}/{cfg.epochs} "
-            f"train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
-            f"elapsed={elapsed:6.1f}s"
+        logger.info(
+            "epoch=%3d/%d train_loss=%.6f val_loss=%.6f elapsed=%6.1fs",
+            epoch, cfg.epochs, train_loss, val_loss, elapsed,
         )
 
         if val_loss < best_val_loss:
@@ -202,8 +203,8 @@ def train_lstm_ae(
         else:
             patience_counter += 1
             if patience_counter >= cfg.patience:
-                print(
-                    f"[LSTM-AE] Early stopping at epoch {epoch} after {patience_counter} epochs without improvement."
+                logger.info(
+                    "early stop at epoch %d (patience=%d)", epoch, cfg.patience
                 )
                 break
 
@@ -223,8 +224,10 @@ def train_lstm_ae(
     # IForest used the bottom quantile of the anomaly scores as the threshold,
     # but for reconstruction error, higher is more anomalous, so we use the upper quantile.
     threshold = float(np.quantile(val_errors, 1.0 - cfg.contamination))
-    print(
-        f"[LSTM-AE] threshold(recon_error @ q={1.0 - cfg.contamination:.3f})={threshold:.6f}")
+    logger.info(
+        "threshold(recon_error @ q=%.3f)=%.6f", 1.0 -
+        cfg.contamination, threshold
+    )
 
     val_pred = val_errors > threshold
     metrics: dict[str, float] = {
@@ -314,6 +317,6 @@ def log_to_mlflow(cfg: LSTMAEConfig, artifacts: LSTMArtifacts) -> str:
             registered_model_name="anomaly-lstmae",
             serialization_format="pickle",
         )
-        print("[MLFLOW] model registered: anomaly-lstmae")
+        logger.info("model registered: anomaly-lstmae")
 
     return run.info.run_id
