@@ -145,8 +145,8 @@ def main() -> None:
         len(machines), split, cfg.topic_events_raw, cfg.smd_replay_speed,
     )
 
-    producer = build_producer(cfg)
     total = 0
+    producer = build_producer(cfg)
     try:
         for txt_path in machines:
             labels = None

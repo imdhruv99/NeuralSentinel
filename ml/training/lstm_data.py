@@ -5,24 +5,8 @@ import numpy as np
 import pandas as pd
 import psycopg
 
+from ml.training.features import flatten_feature_map
 from ml.training.lstm_config import LSTMAEConfig
-
-
-def _flatten_feature_map(feature_map: dict) -> dict[str, float]:
-    """
-    Flatten the nested feature map in SMD's .txt files into a single dict of metric name to value.
-
-    Args:
-        - feature_map: A dict where keys are metric names and values are dicts of statistic names to values.
-
-    Returns:
-        - A flat dict where keys are "<metric_name>__<stat_name>" and values are the corresponding float values.
-    """
-    row: dict[str, float] = {}
-    for metric_name, stats_map in feature_map.items():
-        for stat_name, value in stats_map.items():
-            row[f"{metric_name}__{stat_name}"] = value
-    return row
 
 
 def load_sequence_frame(cfg: LSTMAEConfig) -> pd.DataFrame:
@@ -63,7 +47,7 @@ def load_sequence_frame(cfg: LSTMAEConfig) -> pd.DataFrame:
         f_map = row["features"]
         if isinstance(f_map, str):
             f_map = json.loads(f_map)
-        flat = _flatten_feature_map(f_map)
+        flat = flatten_feature_map(f_map)
         flat["entity_id"] = row["entity_id"]
         flat["window_end"] = row["window_end"]
         flat["label"] = row["label"]

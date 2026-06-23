@@ -2,11 +2,12 @@ import argparse
 import logging
 
 from config.logging import setup_logging
-from ml.training.isolation_forest_config import TrainingConfig, seed_everything
+from config.settings import _seed_everything as seed_everything
+from ml.training.isolation_forest_config import TrainingConfig
 from ml.training.isolation_forest_data import load_training_frame
 from ml.training.isolation_forest_train import log_to_mlflow, train_isolation_forest
 
-from ml.training.lstm_config import LSTMAEConfig, seed_everything
+from ml.training.lstm_config import LSTMAEConfig
 from ml.training.lstm_data import load_sequence_frame
 from ml.training.lstm_train import (
     log_to_mlflow as lstm_log,

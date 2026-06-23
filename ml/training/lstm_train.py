@@ -126,16 +126,21 @@ def train_lstm_ae(
         len(x_train), len(x_val), len(feature_cols), cfg.seq_len,
     )
 
-    # Fit the scaler on the training data only.
-    # Reshape the 3D sequence data into 2D (samples, features) for scaling.
     n_features = len(feature_cols)
-    scaler = StandardScaler()
-    x_train_2d = x_train.reshape(-1, n_features)
-    scaler.fit(x_train_2d)
 
-    # Scale both training and validation data using the same scaler.
-    x_train_scaled = (scaler.transform(x_train_2d).reshape(
-        x_train.shape).astype(np.float32)
+    # Filter normal sequences BEFORE fitting the scaler so anomalous signals
+    # don't skew the feature mean/variance the model trains against.
+    normal_mask = ~y_train
+    x_train_normal_raw = x_train[normal_mask]
+
+    scaler = StandardScaler()
+    scaler.fit(x_train_normal_raw.reshape(-1, n_features))
+
+    # Transform all splits with the scaler fitted on normal sequences only.
+    x_train_scaled = (
+        scaler.transform(x_train.reshape(-1, n_features))
+        .reshape(x_train.shape)
+        .astype(np.float32)
     )
     x_val_scaled = (
         scaler.transform(x_val.reshape(-1, n_features))
@@ -143,8 +148,6 @@ def train_lstm_ae(
         .astype(np.float32)
     )
 
-    # Fit only on normal sequences (label=False) to prevent data leakage of anomalies into the scaler.
-    normal_mask = ~y_train
     x_train_normal = x_train_scaled[normal_mask]
     logger.info(
         "normal training sequences: %d/%d", len(x_train_normal), len(x_train)

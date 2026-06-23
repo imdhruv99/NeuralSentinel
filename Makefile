@@ -95,7 +95,7 @@ logs:
 
 .PHONY: logs-kafka
 logs-kafka:
-	$(COMPOSE) logs -f kafka-broker-1 kafka-broker-2 kafka-broker-3
+	$(COMPOSE) logs -f kafka-broker-1 kafka-broker-2
 
 .PHONY: logs-pg
 logs-pg:

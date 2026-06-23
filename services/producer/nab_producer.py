@@ -122,9 +122,8 @@ def main() -> None:
         len(streams), cfg.topic_events_raw, cfg.nab_replay_speed,
     )
 
-    producer = build_producer(cfg)
     total = 0
-
+    producer = build_producer(cfg)
     try:
         for csv_path in streams:
             stream_key = relative_stream_key(cfg.nab_data_dir, csv_path)

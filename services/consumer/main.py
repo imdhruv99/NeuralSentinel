@@ -104,8 +104,8 @@ def run(cfg: ConsumerConfig) -> None:
                 envelope = EventEnvelope.model_validate_json(msg.value())
             except Exception:
                 # One poison message must not stop the stream.
-                logger.warning("skipping unparseable message at offset %s",
-                               msg.offset(), exc_info=True)
+                logger.error("skipping unparseable message at offset %s",
+                             msg.offset(), exc_info=True)
                 continue
             rows = manager.add(envelope)
             pending.extend(rows)

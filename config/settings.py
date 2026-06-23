@@ -3,14 +3,14 @@ import random
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import SettingsConfigDict
 
 import torch
 
 logger = logging.getLogger(__name__)
 
-_ENV_FILE = Path(__file__).parent.parent / ".env"
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 _MODEL_CONFIG = SettingsConfigDict(
     env_file=_ENV_FILE,
@@ -30,7 +30,7 @@ class _PostgresSettings(BaseModel):
     pg_port: int = Field(default=5432, alias="PG_PORT")
     pg_db: str = Field(default="postgres", alias="POSTGRES_DB")
     pg_user: str = Field(default="nsapp", alias="PG_APP_USER")
-    pg_password: str = Field(default="admin@123", alias="NSAPP_PASSWORD")
+    pg_password: str = Field(alias="NSAPP_PASSWORD")
 
     @property
     def pg_dsn(self) -> str:
@@ -76,6 +76,13 @@ class _TrainingSettings(BaseModel):
     validation_ratio: float = Field(default=0.2, alias="VALIDATION_RATIO")
     seed: int = Field(default=42, alias="TRAIN_SEED")
 
+    @field_validator("contamination")
+    @classmethod
+    def _contamination_in_range(cls, v: float) -> float:
+        if not 0.0 < v < 1.0:
+            raise ValueError(f"contamination must be in (0, 1), got {v}")
+        return v
+
 
 class _RedisSettings(BaseModel):
     """
@@ -84,7 +91,7 @@ class _RedisSettings(BaseModel):
     """
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
-    redis_password: str = Field(default="admin@123", alias="REDIS_PASSWORD")
+    redis_password: str = Field(alias="REDIS_PASSWORD")
     redis_db: int = Field(default=0, alias="REDIS_DB")
 
 
