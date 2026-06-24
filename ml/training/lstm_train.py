@@ -317,9 +317,9 @@ def log_to_mlflow(cfg: LSTMAEConfig, artifacts: LSTMArtifacts) -> str:
         mlflow.pytorch.log_model(
             scripted,
             artifact_path="model",
-            registered_model_name="anomaly-lstmae",
+            registered_model_name="neural-sentinel-lstm-autoencoder-model",
             serialization_format="pickle",
         )
-        logger.info("model registered: anomaly-lstmae")
+        logger.info("model registered: neural-sentinel-lstm-autoencoder-model")
 
     return run.info.run_id

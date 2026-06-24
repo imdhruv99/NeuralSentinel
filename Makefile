@@ -242,3 +242,15 @@ train-iforest:
 .PHONY: train-lstm-ae
 train-lstm-ae:
 	venv/bin/python -m ml.training.main lstm-ae
+
+# -----------------------------------------------------------------------------
+# Champion-Challenger Evaluation
+# -----------------------------------------------------------------------------
+
+.PHONY: evaluate-iforest
+evaluate-iforest:
+	venv/bin/python -m ml.evaluation.main iforest
+
+.PHONY: evaluate-lstm
+evaluate-lstm:
+	venv/bin/python -m ml.evaluation.main lstm

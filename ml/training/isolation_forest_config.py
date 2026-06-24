@@ -23,7 +23,7 @@ class TrainingConfig(_PostgresSettings, _MLFlowSettings, _TrainingSettings, Base
     model_config = _MODEL_CONFIG
 
     mlflow_experiment_name: str = Field(
-        default="neural-sentinel-isolation-forest", alias="MLFLOW_EXPERIMENT_NAME"
+        default="neural-sentinel-isolation-forest", alias="IFOREST_EXPERIMENT_NAME"
     )
 
     contamination: float = Field(default=0.05, alias="CONTAMINATION")

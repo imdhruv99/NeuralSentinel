@@ -238,6 +238,7 @@ def log_to_mlflow(cfg: TrainingConfig, artifacts: TrainArtifacts) -> str:
     signature = infer_signature(input_example, output_example)
 
     with mlflow.start_run(run_name=f"{cfg.mlflow_experiment_name}-baseline-train") as run:
+        model_name = "neural-sentinel-isolation-forest-model"
         mlflow.log_params(
             {
                 "dataset": cfg.dataset,
@@ -263,7 +264,6 @@ def log_to_mlflow(cfg: TrainingConfig, artifacts: TrainArtifacts) -> str:
         mlflow.log_artifact("isolation_forest_threshold.json",
                             artifact_path="calibration")
 
-        model_name = f"{cfg.mlflow_experiment_name}_model"
         try:
             mlflow.sklearn.log_model(
                 sk_model=artifacts.model,
@@ -282,7 +282,7 @@ def log_to_mlflow(cfg: TrainingConfig, artifacts: TrainArtifacts) -> str:
                 {
                     "threshold_score_samples": artifacts.threshold,
                     "feature_columns": artifacts.feature_columns,
-                    "model_name_expected": model_name,
+                    "model_name_expected": "neural-sentinel-isolation-forest-model",
                     "note": "Model registry/log_model skipped due to MLflow API mismatch",
                 },
                 "calibration/isolation_forest_threshold.json",

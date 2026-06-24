@@ -35,6 +35,25 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 │   ├── mlflow-docker-compose.yaml
 │   ├── postgres-docker-compose.yaml
 │   └── redis-docker-compose.yaml
+├── config
+│   ├── logging.py                # shared setup_logging() - structured JSON handler
+│   └── settings.py               # shared pydantic-settings base classes
+├── ml
+│   ├── training
+│   │   ├── features.py           # shared flatten_feature_map() helper
+│   │   ├── isolation_forest_config.py
+│   │   ├── isolation_forest_data.py
+│   │   ├── isolation_forest_train.py
+│   │   ├── lstm_config.py
+│   │   ├── lstm_data.py
+│   │   ├── lstm_model.py
+│   │   ├── lstm_train.py
+│   │   └── main.py               # unified entrypoint (iforest | lstm-ae)
+│   └── evaluation                # champion-challenger harness
+│       ├── config.py             # EvalConfig (PROMOTE_MIN_F1_SCORE, PROMOTE_MIN_DELTA)
+│       ├── evaluator.py          # loads model + calibration, scores held-out set → EvalResult
+│       ├── promoter.py           # pure decision function (PROMOTE / KEEP / NO_CHAMPION)
+│       └── main.py               # orchestrator: find versions → evaluate → transition → audit
 ├── services
 │   ├── common
 │   │   └── contracts.py          # EventEnvelope — shared on-the-wire contract
@@ -50,7 +69,7 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 │   │   ├── windowing.py          # pure event-time windowing engine
 │   │   ├── sinks.py              # Postgres upsert + Redis cache
 │   │   ├── main.py               # poll → window → persist → commit loop
-│   │   └── schema.sql            # features table DDL
+│   │   └── schema.sql            # features + model_promotions DDL
 │   ├── scorer                    # (planned) anomaly scoring → events.scored
 │   └── alert-api                 # (planned) threshold alerts → alerts
 ├── requirements.txt
@@ -372,7 +391,7 @@ The latest window per entity is also cached in Redis under
 Both detectors train on windowed features persisted by the consumer.
 The stack must be up and features must be loaded before running either job.
 
-### Isolation Forest (`anomaly-iforest`)
+### Isolation Forest (`neural-sentinel-isolation-forest-model`)
 
 An `IsolationForest` from scikit-learn is the first-stage detector, optimised
 for the NAB UNIVARIATE path. Isolation Forest works by randomly partitioning
@@ -412,9 +431,9 @@ shape is assumed.
 make train-iforest
 ```
 
-Results are visible in the MLflow UI at http://localhost:58083 under the `neural-sentinel-isolation-forest` experiment. Registered model: `anomaly-iforest`.
+Results are visible in the MLflow UI at http://localhost:58083 under the `neural-sentinel-isolation-forest` experiment. Registered model: `neural-sentinel-isolation-forest-model`.
 
-### LSTM Autoencoder (anomaly-lstmae)
+### LSTM Autoencoder (`neural-sentinel-lstm-autoencoder-model`)
 
 An LSTM-based sequence autoencoder is the second-stage detector, trained on the SMD MULTIVARIATE path (28 machines × 38 metrics). Where the Isolation Forest scores individual feature vectors, the LSTM-AE scores sequences, it learns to reconstruct normal temporal patterns and flags windows where reconstruction error is high.
 
@@ -467,4 +486,83 @@ The decoder receives the same bottleneck vector at every timestep as input - not
 make train-lstm-ae
 ```
 
-Results are visible in the MLflow UI at http://localhost:58083 under the `neural-sentinel-lstm-ae` experiment. Registered model: `anomaly-lstmae`.
+Results are visible in the MLflow UI at http://localhost:58083 under the `neural-sentinel-lstm-autoencoder` experiment. Registered model: `neural-sentinel-lstm-autoencoder-model`.
+
+---
+
+## Champion–Challenger Evaluation & Model Promotion
+
+After training, a dedicated evaluation harness compares the **challenger** (newest version) against the current **champion** (Production stage) on a held-out labeled validation set. If the challenger beats the champion by a configured margin it is automatically transitioned to Production in the MLflow registry and the old version is archived.
+
+### How it works
+
+```text
+Challenger (latest version)           Champion (Production version)
+        │                                         │
+        ▼                                         ▼
+  load model + calibration               load model + calibration
+        │                                         │
+        ▼                                         ▼
+  score held-out windows                score held-out windows
+  precision / recall / F1               precision / recall / F1
+  PR-AUC / ROC-AUC                      PR-AUC / ROC-AUC
+        │                                         │
+        └──────────────┬───────────────────────── ┘
+                       ▼
+              promoter.decide()
+               PROMOTE / KEEP / NO_CHAMPION
+                       │
+          ┌────────────┴─────────────────┐
+          ▼                              ▼
+  transition challenger         keep current champion
+  → Production                  in Production
+  archive champion
+          │
+          ▼
+  INSERT audit row → model_promotions (Postgres)
+```
+
+**Decision rules** (configured in `.env`):
+
+| Condition | Decision |
+|---|---|
+| No champion exists yet | `NO_CHAMPION` → promote unconditionally |
+| `challenger.f1 < PROMOTE_MIN_F1_SCORE` | `KEEP` — challenger is too weak regardless of delta |
+| `challenger.f1 − champion.f1 ≥ PROMOTE_MIN_DELTA` | `PROMOTE` |
+| Otherwise | `KEEP` |
+
+### Module layout
+
+| File | Responsibility |
+|---|---|
+| `ml/evaluation/config.py` | `EvalConfig` — inherits Postgres + MLflow settings; exposes `PROMOTE_MIN_F1_SCORE`, `PROMOTE_MIN_DELTA`, `EVAL_VALIDATION_RATIO`. |
+| `ml/evaluation/evaluator.py` | Loads model + calibration artifact from MLflow, queries windowed features from Postgres, returns `EvalResult(precision, recall, f1, pr_auc, roc_auc, n_samples, anomaly_rate)`. |
+| `ml/evaluation/promoter.py` | Pure, I/O-free decision function. `decide(challenger, champion, min_f1, min_delta) → PromotionVerdict`. |
+| `ml/evaluation/main.py` | Orchestrator: find Staging/latest version → evaluate → call promoter → MLflow stage transition → write audit log. |
+
+### Audit log
+
+Every evaluation writes one row to the `model_promotions` table in the `projects` Postgres database:
+
+```sql
+SELECT model_name, challenger_version, champion_version, decision, reason, promoted_at
+FROM model_promotions ORDER BY id;
+```
+
+### Running evaluation
+
+```bash
+make evaluate-iforest   # evaluate neural-sentinel-isolation-forest-model
+make evaluate-lstm      # evaluate neural-sentinel-lstm-autoencoder-model
+```
+
+First run (no Production version) → `NO_CHAMPION` → challenger is promoted to Production automatically.
+Subsequent runs compare the latest version against the incumbent.
+
+### Config knobs
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PROMOTE_MIN_F1_SCORE` | `0.0` | Minimum absolute F1 the challenger must reach |
+| `PROMOTE_MIN_DELTA` | `0.01` | Minimum F1 improvement over champion to trigger promotion |
+| `EVAL_VALIDATION_RATIO` | `0.2` | Fraction of the feature store used as the held-out eval set |
