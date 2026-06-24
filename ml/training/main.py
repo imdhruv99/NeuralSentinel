@@ -35,7 +35,7 @@ def run_isolation_forest() -> int:
     run_id = log_to_mlflow(cfg, artifacts)
 
     logger.info("training complete — run_id=%s", run_id)
-    logger.info("registered model: anomaly-iforest")
+    logger.info("registered model: neural-sentinel-isolation-forest-model")
     logger.info(
         "threshold (score_samples, lower = more anomalous): %.6f", artifacts.threshold)
     for key, value in artifacts.metrics.items():
@@ -61,7 +61,7 @@ def run_lstm_ae() -> int:
     run_id = lstm_log(cfg, artifacts)
 
     logger.info("training complete — run_id=%s", run_id)
-    logger.info("registered model: anomaly-lstmae")
+    logger.info("registered model: neural-sentinel-lstm-autoencoder-model")
     logger.info(
         "threshold (recon error, higher = more anomalous): %.6f", artifacts.threshold)
     for key, value in artifacts.metrics.items():

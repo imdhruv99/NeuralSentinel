@@ -20,3 +20,19 @@ CREATE TABLE IF NOT EXISTS features (
 
 CREATE INDEX IF NOT EXISTS idx_features_dataset_time
     ON features (dataset, window_end);
+
+
+CREATE TABLE IF NOT EXISTS model_promotions (
+    id                SERIAL PRIMARY KEY,
+    model_name        TEXT        NOT NULL,
+    challenger_version INTEGER    NOT NULL,
+    champion_version  INTEGER,
+    decision          TEXT        NOT NULL,
+    reason            TEXT        NOT NULL,
+    challenger_metrics JSONB      NOT NULL,
+    champion_metrics  JSONB,
+    promoted_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotions_model_time
+    ON model_promotions (model_name, promoted_at DESC);

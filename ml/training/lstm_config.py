@@ -29,7 +29,7 @@ class LSTMAEConfig(_PostgresSettings, _MLFlowSettings, _TrainingSettings, BaseSe
     model_config = _MODEL_CONFIG
 
     mlflow_experiment_name: str = Field(
-        default="neural-sentinel-lstm-ae", alias="LSTMAE_EXPERIMENT_NAME"
+        default="neural-sentinel-lstm-autoencoder", alias="LSTMAE_EXPERIMENT_NAME"
     )
 
     # Sequence architecture hyperparameters
