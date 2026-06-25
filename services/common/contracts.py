@@ -89,3 +89,48 @@ class EventEnvelope(BaseModel):
         Dataset/StreamType subclass `str`, so the wire format stays clean JSON.
         """
         return self.model_dump_json().encode("utf-8")
+
+
+class ScoredEnvelope(BaseModel):
+    """
+    Kafka value for events.scored.
+
+    Annotates a feature window with the anomaly score emitted by the
+    real-time scoring pipeline. Downstream consumers (alert API, dashboard)
+    subscribe to this topic rather than querying Postgres directly.
+    """
+
+    entity_id: str
+    dataset: Dataset
+    stream_type: StreamType
+    window_end: str               # the window boundary that was scored
+    model_name: str               # MLflow registered model name
+    model_version: int            # MLflow version that produced this score
+    # raw model output (comparable within one model family)
+    anomaly_score: float
+    is_anomaly: bool              # threshold decision
+    scored_at: str = Field(default_factory=_utc_now_iso)
+
+    def to_json_bytes(self) -> bytes:
+        return self.model_dump_json().encode("utf-8")
+
+
+class AlertEnvelope(BaseModel):
+    """
+    Kafka value for the alerts topic.
+
+    Published when a scored window crosses the anomaly threshold and the
+    per-entity cooldown has not suppressed it. Carries enough context for
+    an alert consumer to render a notification without a Postgres round-trip.
+    """
+
+    entity_id: str
+    dataset: Dataset
+    model_name: str
+    model_version: int
+    anomaly_score: float
+    window_end: str               # window that triggered the alert
+    alert_at: str = Field(default_factory=_utc_now_iso)
+
+    def to_json_bytes(self) -> bytes:
+        return self.model_dump_json().encode("utf-8")
