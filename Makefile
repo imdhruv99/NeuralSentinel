@@ -52,8 +52,15 @@ help:
 	@echo "    consume       Run the feature-windowing consumer (Ctrl-C to drain)"
 	@echo ""
 	@echo "  ML Training"
-	@echo "  train-iforest   Train an isolation forest on NAB features and log to MLflow"
-	@echo "  train-lstm-ae   Train an LSTM-AE on SMD sequences and log to MLflow"
+	@echo "    train-iforest     Train Isolation Forest on NAB features + log to MLflow"
+	@echo "    train-lstm-ae     Train LSTM Autoencoder on SMD sequences + log to MLflow"
+	@echo ""
+	@echo "  Evaluation"
+	@echo "    evaluate-iforest  Champion-challenger evaluation for the IForest model"
+	@echo "    evaluate-lstm     Champion-challenger evaluation for the LSTM-AE model"
+	@echo ""
+	@echo "  Scoring"
+	@echo "    score             Run the real-time anomaly scoring service (Ctrl-C to stop)"
 	@echo ""
 
 # -----------------------------------------------------------------------------
@@ -254,3 +261,15 @@ evaluate-iforest:
 .PHONY: evaluate-lstm
 evaluate-lstm:
 	venv/bin/python -m ml.evaluation.main lstm
+
+# -----------------------------------------------------------------------------
+# Scoring service (host execution, run as module)
+# -----------------------------------------------------------------------------
+# Polls Postgres for unscored feature windows, runs each through the current
+# Production model, writes scores to the scores table, and emits ScoredEnvelopes
+# to events.scored + anomaly alerts to the alerts topic.  Run `make migrate`
+# first to ensure the scores table exists.  Ctrl-C triggers a clean shutdown
+# (the Kafka producer is flushed before exit).
+.PHONY: score
+score:
+	venv/bin/python -m services.scorer.main
