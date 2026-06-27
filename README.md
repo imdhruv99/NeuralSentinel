@@ -42,6 +42,10 @@ flowchart TD
         AL["Kafka: alerts"]
     end
 
+    subgraph api["Query API"]
+        QA["FastAPI\nREST + SSE over HTTP"]
+    end
+
     NAB --> NP
     SMD --> SP
     NP --> ER
@@ -62,6 +66,8 @@ flowchart TD
     SC --> PGS
     SC --> ES
     SC --> AL
+    PGS --> QA
+    PGP --> QA
 ```
 
 ---
@@ -131,13 +137,24 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 │   │   ├── sinks.py              # Postgres upsert + Redis cache
 │   │   ├── main.py               # poll -> window -> persist -> commit loop
 │   │   └── schema.sql            # features, model_promotions, scores DDL
-│   └── scorer                    # features -> anomaly scores -> events.scored + alerts
+│   ├── scorer                    # features -> anomaly scores -> events.scored + alerts
 │       ├── config.py             # ScorerConfig (poll interval, batch size, cooldown)
 │       ├── model_registry.py     # thread-safe hot-reload from MLflow on promotion
 │       ├── scorer.py             # stateless scoring: score_iforest, score_lstm
 │       ├── alert_dedup.py        # Redis SET NX EX per-entity cooldown
 │       ├── publisher.py          # Kafka producer for events.scored and alerts
 │       └── main.py               # watermark-driven polling loop
+│   └── api                       # REST + SSE query API for external clients
+│       ├── config.py             # APIConfig (host, port, api_key, pagination knobs)
+│       ├── auth.py               # X-API-Key header dependency
+│       ├── db.py                 # asyncpg pool + typed query functions
+│       ├── models.py             # Pydantic response models (public API contract)
+│       ├── routes/
+│       │   ├── health.py         # GET /healthz (no auth)
+│       │   ├── alerts.py         # GET /alerts  GET /alerts/stream (SSE)
+│       │   ├── entities.py       # GET /entities/series?entity_id=...
+│       │   └── registry.py       # GET /model/current
+│       └── main.py               # app factory: lifespan, router mounting, CORS
 ├── requirements.txt
 ├── Makefile
 └── README.md
@@ -568,3 +585,76 @@ ORDER BY scored_at DESC LIMIT 20;
 | `SCORER_BATCH_SIZE` | `100` | Max windows to fetch and score per poll cycle |
 | `SCORER_MODEL_REFRESH_CYCLES` | `12` | Check MLflow for version changes every N cycles |
 | `ALERT_COOLDOWN_S` | `300` | Per-entity alert suppression window in seconds |
+
+---
+
+## Query API
+
+The query API is an HTTP service that exposes scored anomaly data to dashboards, downstream pipelines, and operators. It reads from the `scores` and `model_promotions` tables and streams new alerts to connected clients via Server-Sent Events.
+
+Interactive documentation is available at `http://localhost:8000/docs` (Swagger UI) when the service is running.
+
+### Authentication
+
+All endpoints except `/healthz` require an `X-API-Key` header. The key is a shared secret configured via `API_KEY` in `.env`. This is a service-to-service secret - do not embed it in client-side code.
+
+```bash
+curl -H "X-API-Key: <your-key>" http://localhost:8000/alerts
+```
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/healthz` | None | DB liveness probe. Returns `{"status":"ok","db":"ok"}`. |
+| `GET` | `/alerts` | Required | Paginated list of anomalous score rows, newest first. |
+| `GET` | `/alerts/stream` | Required | SSE stream of new alerts. Long-lived connection; each event is a JSON `ScoreRow`. |
+| `GET` | `/entities/series` | Required | All score rows (anomalous and normal) for one entity, newest first. |
+| `GET` | `/model/current` | Required | Currently promoted Production model versions. |
+
+### Pagination
+
+List endpoints (`/alerts`, `/entities/series`) use **cursor-based pagination** on `scored_at`. The response includes a `next_cursor` field - pass it as the `before` query parameter to fetch the next page. When `next_cursor` is `null` there are no more pages.
+
+```bash
+# First page
+curl -H "X-API-Key: <key>" "http://localhost:8000/alerts?limit=20"
+
+# Next page (use next_cursor from previous response)
+curl -H "X-API-Key: <key>" "http://localhost:8000/alerts?before=2026-06-27T19:00:00Z&limit=20"
+```
+
+### SSE stream
+
+Each event is a JSON-encoded score row pushed as soon as a new anomaly is written to the `scores` table. The server polls every `SSE_POLL_INTERVAL_S` seconds. Reconnection on drop is handled automatically by the browser's `EventSource` API.
+
+```bash
+# Keep-alive stream; events appear as anomalies are scored
+curl -N -H "X-API-Key: <key>" http://localhost:8000/alerts/stream
+```
+
+### Entity series
+
+Entity IDs can contain `/` (e.g. `NAB/realAdExchange/exchange-2_cpc_results`). Pass the full ID as a query parameter - do not URL-encode the slashes.
+
+```bash
+curl -H "X-API-Key: <key>" \
+  "http://localhost:8000/entities/series?entity_id=NAB/realAdExchange/exchange-2_cpc_results"
+```
+
+### Running the API
+
+```bash
+make serve    # starts on 0.0.0.0:8000; Ctrl-C to stop
+```
+
+### Config knobs
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `API_KEY` | (required) | Shared secret for `X-API-Key` header authentication |
+| `API_HOST` | `0.0.0.0` | Bind address |
+| `API_PORT` | `8000` | Listen port |
+| `API_DEFAULT_PAGE_SIZE` | `50` | Default items per page when `limit` is not specified |
+| `API_MAX_PAGE_SIZE` | `500` | Maximum `limit` a client can request |
+| `SSE_POLL_INTERVAL_S` | `2.0` | How often the SSE generator polls Postgres for new alerts |

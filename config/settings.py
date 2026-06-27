@@ -39,6 +39,16 @@ class _PostgresSettings(BaseModel):
             f"dbname={self.pg_db} user={self.pg_user} password={self.pg_password}"
         )
 
+    @property
+    def asyncpg_dsn(self) -> str:
+        # Percent-encode user and password so special characters (@ $ : /) in
+        # credentials do not break URL parsing at the asyncpg driver level.
+        from urllib.parse import quote_plus
+        return (
+            f"postgresql://{quote_plus(self.pg_user)}:{quote_plus(self.pg_password)}"
+            f"@{self.pg_host}:{self.pg_port}/{self.pg_db}"
+        )
+
 
 class _KafkaSettings(BaseModel):
     """

@@ -62,6 +62,8 @@ help:
 	@echo "  Scoring"
 	@echo "    score             Run the real-time anomaly scoring service (Ctrl-C to stop)"
 	@echo ""
+	@echo ""
+	@echo "  serve 		   Run the FastAPI scoring service (Ctrl-C to stop)"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -273,3 +275,11 @@ evaluate-lstm:
 .PHONY: score
 score:
 	venv/bin/python -m services.scorer.main
+
+
+# -----------------------------------------------------------------------------
+# Query API (host execution, run as module)
+# -----------------------------------------------------------------------------
+.PHONY: serve
+serve:
+	venv/bin/python -m services.api.main
