@@ -68,7 +68,7 @@
 - **Config:** `SEQ_LEN`, `HIDDEN_DIM`, `EPOCHS`, `LR`.
 - **DoD:** `anomaly-lstmae` registered; ROC-AUC reported on the SMD labeled test split.
 
-### RTAD-007 — Champion–Challenger evaluation + promotion
+### RTAD-007 — Champion–Challenger evaluation + promotion - COMPLETED
 
 - **Type:** Story · **Epic:** F MLOps · **Priority:** High · **Points:** 5
 - **Description:** Evaluate both detectors on a held-out labeled set and auto-promote the winner to the `Production` stage in MLflow.
@@ -78,7 +78,7 @@
 - **Config:** `PROMOTE_MIN_F1`, `PROMOTE_MIN_DELTA`.
 - **DoD:** Re-running with a better challenger flips Production automatically.
 
-### RTAD-008 — Real-time scoring consumer
+### RTAD-008 — Real-time scoring consumer - COMPLETED
 
 - **Type:** Story · **Epic:** D Serving · **Priority:** Critical · **Points:** 5
 - **Description:** Load the current Production model, score windowed features in real time, and emit results to `events.scored` and threshold-crossing `alerts`.
@@ -88,7 +88,7 @@
 - **Config:** `ALERT_COOLDOWN_S`, `MODEL_STAGE=Production`.
 - **DoD:** End-to-end: a labeled (NAB/SMD) anomaly → alert in < 2s p95.
 
-### RTAD-009 — Alert/Query API (FastAPI)
+### RTAD-009 — Alert/Query API (FastAPI) - COMPLETED
 
 - **Type:** Story · **Epic:** D · **Priority:** High · **Points:** 3
 - **Description:** Expose REST + SSE endpoints for live alerts, entity history, and current model metadata.
