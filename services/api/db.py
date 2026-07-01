@@ -149,3 +149,40 @@ async def fetch_current_models(pool: Pool) -> list[asyncpg.Record]:
         ORDER BY model_name, promoted_at DESC
         """
     )
+
+
+async def fetch_entity_ids(
+    pool: Pool,
+    *,
+    dataset: str | None,
+    limit: int,
+) -> list[str]:
+    """
+    Fetches a list of distinct entity IDs from the database, optionally filtered by dataset.
+
+    Args:
+        pool (Pool): The asyncpg connection pool to use for database queries.
+        dataset (str | None): Optional dataset prefix to filter entity IDs.
+        limit (int): The maximum number of entity IDs to fetch.
+
+    Returns:
+        list[str]: A list of distinct entity IDs.
+    """
+    if dataset:
+        rows = await pool.fetch(
+            """
+            SELECT DISTINCT entity_id
+            FROM scores
+            WHERE entity_id LIKE $1
+            ORDER BY entity_id
+            LIMIT $2
+            """,
+            f"{dataset}/%",
+            limit,
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT DISTINCT entity_id FROM scores ORDER BY entity_id LIMIT $1",
+            limit,
+        )
+    return [row["entity_id"] for row in rows]

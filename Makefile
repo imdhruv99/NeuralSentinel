@@ -64,6 +64,10 @@ help:
 	@echo ""
 	@echo ""
 	@echo "  serve 		   Run the FastAPI scoring service (Ctrl-C to stop)"
+	@echo "  Frontend"
+	@echo "    frontend-install     Install frontend npm dependencies"
+	@echo "    frontend-dev         Start frontend dev server (hot reload)"
+	@echo "    frontend-build       Build frontend for production"
 
 # -----------------------------------------------------------------------------
 # Stack control
@@ -283,3 +287,19 @@ score:
 .PHONY: serve
 serve:
 	venv/bin/python -m services.api.main
+
+
+# -----------------------------------------------------------------------------
+# Dashboard
+# -----------------------------------------------------------------------------
+.PHONY: frontend-install
+frontend-install:
+	cd frontend && npm install
+
+.PHONY: frontend-dev
+frontend-dev:
+	cd frontend && npm run dev
+
+.PHONY: frontend-build
+frontend-build:
+	cd frontend && npm run build
