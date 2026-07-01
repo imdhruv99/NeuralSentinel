@@ -4,10 +4,35 @@ from typing import Optional
 from asyncpg import Pool
 from fastapi import APIRouter, Depends, Query
 
-from services.api.db import fetch_entity_series, get_pool
+from services.api.db import fetch_entity_ids, fetch_entity_series, get_pool
 from services.api.models import EntitySeries, ScoreRow
 
 router = APIRouter(prefix="/entities", tags=["Entities"])
+
+
+@router.get("", response_model=list[str])
+async def list_entities(
+    dataset: Optional[str] = Query(
+        default=None,
+        description="Filter by dataset prefix: NAB or SMD.",
+    ),
+    limit: int = Query(default=200, ge=1, le=1000),
+    pool: Pool = Depends(get_pool),
+) -> list[str]:
+    """
+    List all unique entity IDs, optionally filtered by dataset prefix.
+
+    Args:
+        dataset (str | None): Optional dataset prefix to filter entity IDs.
+        limit (int): The maximum number of entity IDs to return. Must be between 1
+            and 1000. Defaults to 200.
+        pool (Pool): The asyncpg connection pool for the database, injected by FastAPI's
+            dependency injection system.
+
+    Returns:
+        list[str]: A list of unique entity IDs, optionally filtered by dataset prefix.
+    """
+    return await fetch_entity_ids(pool, dataset=dataset, limit=limit)
 
 
 @router.get("/series", response_model=EntitySeries)
