@@ -98,7 +98,7 @@
 - **Config:** `API_KEY`, `PORT=8000`.
 - **DoD:** Swagger UI live; SSE pushes alerts in real time.
 
-### RTAD-010 — React dashboard
+### RTAD-010 — React dashboard - COMPLETED
 
 - **Type:** Story · **Epic:** E Frontend · **Priority:** High · **Points:** 5
 - **Description:** A functional dashboard showing live time-series, anomaly markers, an alert feed, and the active model.

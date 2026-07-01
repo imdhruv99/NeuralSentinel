@@ -46,6 +46,10 @@ flowchart TD
         QA["FastAPI\nREST + SSE over HTTP"]
     end
 
+    subgraph dashboard["Dashboard"]
+        DA["React Dashboard\nVite + TypeScript"]
+    end
+
     NAB --> NP
     SMD --> SP
     NP --> ER
@@ -68,6 +72,7 @@ flowchart TD
     SC --> AL
     PGS --> QA
     PGP --> QA
+    QA --> DA
 ```
 
 ---
@@ -155,6 +160,23 @@ The NeuralSentinel infrastructure is modularized using Docker Compose, separatin
 │       │   ├── entities.py       # GET /entities/series?entity_id=...
 │       │   └── registry.py       # GET /model/current
 │       └── main.py               # app factory: lifespan, router mounting, CORS
+├── frontend                          # browser dashboard (Vite + React + TypeScript)
+│   ├── src/
+│   │   ├── api/
+│   │   │   ├── client.ts             # base fetch wrapper with auth header injection
+│   │   │   └── types.ts              # TypeScript interfaces mirroring FastAPI response models
+│   │   ├── hooks/
+│   │   │   ├── useCurrentModel.ts    # fetch /model/current on mount
+│   │   │   ├── useEntitySeries.ts    # fetch /entities/series, re-runs on entity change
+│   │   │   └── useAlertStream.ts     # SSE via @microsoft/fetch-event-source, AbortController cleanup
+│   │   ├── components/
+│   │   │   ├── Header.tsx            # active model name + version banner
+│   │   │   ├── EntitySearch.tsx      # controlled input, submits on Enter
+│   │   │   ├── ScoreChart.tsx        # Recharts LineChart + red ReferenceDots on anomalies
+│   │   │   └── AlertFeed.tsx         # SSE-driven sidebar, rolling last 100 alerts
+│   │   └── App.tsx                   # layout shell, selectedEntity state
+│   ├── package.json
+│   └── vite.config.ts
 ├── requirements.txt
 ├── Makefile
 └── README.md
@@ -658,3 +680,46 @@ make serve    # starts on 0.0.0.0:8000; Ctrl-C to stop
 | `API_DEFAULT_PAGE_SIZE` | `50` | Default items per page when `limit` is not specified |
 | `API_MAX_PAGE_SIZE` | `500` | Maximum `limit` a client can request |
 | `SSE_POLL_INTERVAL_S` | `2.0` | How often the SSE generator polls Postgres for new alerts |
+
+---
+
+## Dashboard
+
+A browser dashboard built with Vite, React 19, and TypeScript. It connects to the query API and visualises anomaly scores in real time without any page refresh.
+
+### What it shows
+
+- **Model banner** - the currently promoted Production model name and version, fetched on load
+- **Entity time-series** - Recharts line chart of `anomaly_score` over time for any entity you type in; anomalous windows are marked as red dots on the line
+- **Live alert feed** - right-hand sidebar that receives new anomaly alerts the instant they are written to the `scores` table, via a persistent SSE connection
+
+### Setup
+
+Create `frontend/.env` (already gitignored by Vite):
+
+```
+VITE_API_BASE=http://localhost:8000
+VITE_API_KEY=<your API_KEY from .env>
+```
+
+Install dependencies and start the dev server:
+
+```bash
+make frontend-install   # npm install inside frontend/
+make frontend-dev       # starts on http://localhost:5173
+```
+
+The query API (`make serve`) must be running for the dashboard to load data.
+
+### Architecture note
+
+The browser's built-in `EventSource` API does not support custom request headers, which is required for the `X-API-Key` auth. The dashboard uses `@microsoft/fetch-event-source` instead - a small library that implements the SSE protocol over the standard `fetch` API, which does support headers. The connection is torn down cleanly via an `AbortController` when the component unmounts.
+
+`VITE_API_KEY` ends up in the JavaScript bundle, which is acceptable for a local development dashboard. For a public deployment, move the key server-side behind a backend-for-frontend proxy.
+
+### Config
+
+| Variable | Meaning |
+|---|---|
+| `VITE_API_BASE` | Base URL of the query API, e.g. `http://localhost:8000` |
+| `VITE_API_KEY` | Shared secret matching `API_KEY` in the backend `.env` |
